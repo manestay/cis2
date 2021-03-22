@@ -1,0 +1,3 @@
+[submodule "glucose"]
+	path = glucose
+	url = git@github.com:ElementalCognition/glucose.git
