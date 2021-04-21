@@ -1,0 +1,7 @@
+gpt2_data/gpt2_dev
+gpt2_data/gpt2_training
+t5_data/t5_training_data.tsv
+
+outputs/
+runs/
+wandb/
