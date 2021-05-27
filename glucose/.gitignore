@@ -1,3 +1,4 @@
+t5_data/tokenized/
 gpt2_data/gpt2_dev
 gpt2_data/gpt2_training
 t5_data/t5_training_data.tsv
@@ -5,3 +6,6 @@ t5_data/t5_training_data.tsv
 outputs/
 runs/
 wandb/
+
+.DS_Store
+*.pyc
