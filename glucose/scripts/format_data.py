@@ -146,8 +146,10 @@ def split_contexts(df):
     story_before, target_sentence, story_after = selected_split[0], selected_split[1], selected_split[2]
     story = story_before + target_sentence + story_after
     story_id = df['story_id']
+    experiment_id = df['experiment_id']
     d = {'dim': dim, 'story_before': story_before, 'target': target_sentence,
-         'story_after': story_after, 'story': story, 'story_id': story_id, 'output_orig': X_output}
+         'story_after': story_after, 'story': story, 'story_id': story_id, 'output_orig': X_output,
+         'experiment_id': experiment_id}
     df_new = pd.DataFrame(d)
     return df_new
 
@@ -194,17 +196,18 @@ def format_data(train_path, exp_num, split_val=False, orig_val=True, seed=0, is_
 
     # else we need to reformat
     df_train = split_contexts(df_train_ex)
+    df_val = None
+    if split_val:
+        df_val = split_contexts(df_val_ex)
     logging.debug(f"split stories into before/target sentence/after")
 
     if exp_num == '0':
         return df_train, df_val, ids_val
 
     df_train1 = get_in_out_df(df_train, exp_num)
-
     df_val1 = None
     if split_val:
         df_val1 = get_in_out_df(df_val, exp_num)
-
     return df_train1, df_val1, ids_val
 
 
@@ -213,7 +216,7 @@ if __name__ == "__main__":
     if args.logging:
         logging.basicConfig(level=logging.DEBUG)
 
-    # df_train, df_val, ids_val = format_data(args.train_path, args.exp_num,
-    #                                         split_val=args.split_val, seed=args.seed)
+    df_train, df_val, ids_val = format_data(args.train_path, args.exp_num,
+                                            split_val=args.split_val, seed=args.seed)
     df_test, _, _ = format_data(args.test_path, args.exp_num,
                                             split_val=False, seed=args.seed, is_test=True)
