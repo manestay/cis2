@@ -22,7 +22,7 @@ parser.add_argument('--count_escaped', '-ce', action='store_true',
                          'but we consider it incorrect.')
 
 # this ID is always `escaped`, so it has no rows in the expanded test CSV. We add it in as a row
-# in the compact CSV, so we can compare the same length.
+# in the canonical CSV, so we can compare the same length.
 EMPTY_ID = "6f55e830-3f7b-4b96-b9f2-022e01dca25b__4"
 
 def main(submission_path, key_path, count_escaped=False):

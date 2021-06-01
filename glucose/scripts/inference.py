@@ -1,7 +1,13 @@
+'''
+Runs inference on the trained GLUCOSE models. It will evaluate all checkpoints within the folder
+specified by --model_dir.
+
+If you wish to use `evaluation_baseline.py`, pass in the --canonical option. canonical means the
+`canonical` CSV format, as given by the original GLUCOSE paper.
+'''
+
 import argparse
 from pathlib import Path
-from os.path import isdir
-import pdb
 
 import datasets
 import torch
@@ -18,7 +24,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('exp_num', type=str)
 parser.add_argument('--model_dir', '-m', default=MODEL_DIR)
 parser.add_argument('--dataset_dir', '-d', default=DATA_PATH,
-                    help='the dataset, if a dir, assumed to be val, if a .csv, assumed to be test')
+                    help='the dataset dir, saved by datasets.save_to_disk')
 
 parser.add_argument('--all', action='store_true')
 parser.add_argument('--batch_size', '-bs', default=384, type=int)
