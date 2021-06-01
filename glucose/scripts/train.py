@@ -23,6 +23,8 @@ parser.add_argument('--seed', type=int, default=SEED)
 parser.add_argument('--model_size', '-m', default='t5-base')
 parser.add_argument('--no_shuffle', dest='shuffle', action='store_false')
 parser.add_argument('--eval_bleu', action='store_true') # extremely slow!
+parser.add_argument('--batch_size_train', '-bst', type=int, default=0)
+parser.add_argument('--batch_size_eval', '-bse', type=int, default=0)
 
 parser.add_argument('--no_logging', dest='logging', action='store_false')
 
@@ -116,17 +118,19 @@ if __name__ == "__main__":
     ds_val = datasets.load_from_disk(f'{args.dataset_dir}/ds_val')
 
     if args.model_size == 't5-large':
-        batch_size_train = 4
-        batch_size_eval = 12 if args.eval_bleu else 2
+        batch_size_train = args.batch_size_train or 4
+        batch_size_eval = args.batch_size_eval or (12 if args.eval_bleu else 2)
         use_fp16 = False
     elif args.model_size == 't5-base':
-        batch_size_train = 50
-        batch_size_eval = 50 if not args.eval_bleu else 10
+        batch_size_train = args.batch_size_train or 30
+        batch_size_eval = args.batch_size_eval or (30 if not args.eval_bleu else 10)
         use_fp16 = True
     else:
         print('invalid model size!')
         os.exit()
-
+    if not args.eval_bleu:
+        compute_metrics = None
+    print(batch_size_eval, batch_size_train)
     print(args)
 
     # wandb.login()
