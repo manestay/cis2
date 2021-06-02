@@ -107,6 +107,10 @@ if __name__ == "__main__":
     # load tokenizer and datasets from disk
     tokenizer = AutoTokenizer.from_pretrained(args.model_size)
 
+    if args.exp_num == '2b':
+        special_tokens_dict = {'additional_special_tokens': ['<mask_sent>']}
+        add_toks = tokenizer.add_special_tokens(special_tokens_dict)
+
     exp_name = f'exp{args.exp_num}_{args.model_size}'
     if not args.output_dir:
         args.output_dir = f'{GLUCOSE_DIR}/outputs/{exp_name}'
@@ -116,7 +120,9 @@ if __name__ == "__main__":
     logging.debug(f'loading datasets from from {args.dataset_dir}...')
     ds_train = datasets.load_from_disk(f'{args.dataset_dir}/ds_train')
     ds_val = datasets.load_from_disk(f'{args.dataset_dir}/ds_val')
-
+    logging.debug(f'example from train:')
+    logging.debug(f'{tokenizer.decode(ds_train[200]["input_ids"])}')
+    logging.debug(f'{tokenizer.decode(ds_train[200]["labels"])}')
     if args.model_size == 't5-large':
         batch_size_train = args.batch_size_train or 4
         batch_size_eval = args.batch_size_eval or (12 if args.eval_bleu else 2)

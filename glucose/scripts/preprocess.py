@@ -98,8 +98,8 @@ def preprocess(args):
 
     # verify proper encoding
     logging.debug('example text after encoding and decoding:')
-    logging.debug(tokenizer.decode(ds_val[0]['input_ids']))
-    logging.debug(tokenizer.decode(ds_val[0]['labels']))
+    logging.debug(tokenizer.decode(ds_train[200]['input_ids']))
+    logging.debug(tokenizer.decode(ds_train[200]['labels']))
 
     logging.debug(f'saving tokenized datasets to disk at {args.dataset_dir}')
     ds_train.save_to_disk(f'{args.dataset_dir}/ds_train')
