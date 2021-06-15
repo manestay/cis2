@@ -140,6 +140,6 @@ if __name__ == "__main__":
     print(args)
 
     # wandb.login()
-    wandb.init(project="glucose_hf", name=exp_name)
+    wandb.init(project="glucose_hf", name=exp_name, id=wandb.util.generate_id())
     print('before main')
     main(args, exp_name, tokenizer, ds_train, ds_val, batch_size_train, batch_size_eval, use_fp16=use_fp16)

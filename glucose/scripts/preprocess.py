@@ -30,7 +30,7 @@ parser.add_argument('--no_logging', dest='logging', action='store_false')
 
 # uses the parser from format_data.py, with additional arguments
 parser.add_argument('--dataset_dir')
-parser.add_argument('--model_size', '-m', default='t5-base')
+parser.add_argument('--model_size', '-ms', default='t5-base')
 parser.add_argument('--out_location', default=SAVE_DIR)
 parser.set_defaults(val_ids=f'{SAVE_DIR}/val_ids.txt')
 
@@ -116,8 +116,8 @@ def get_in_out_df(df, exp_num):
         return get_in_out_df_exp2b(df)
     elif exp_num == '3a':
         return get_in_out_df_exp3a(df)
-    elif exp_num == '3b':
-        return get_in_out_df_exp3b(df)
+    # elif exp_num == '3b':
+    #     return get_in_out_df_exp3b(df)
     else:
         print('invalid exp num!')
 
@@ -156,13 +156,13 @@ def get_in_out_df_exp3a(df):
     return df
 
 
-def get_in_out_df_exp3b(df):
-    # after instead of before, since we have at least 1
-    df = df[(df['story_after'] != '')].reset_index()
-    target_highlighted = df['target'].apply(lambda x: f' *{x}*')
-    df['input'] = df['dim'] + ': ' + df['story_before'].str.strip() + target_highlighted
-    df['output'] = df['output_orig']
-    return df
+# def get_in_out_df_exp3b(df):
+#     # after instead of before, since we have at least 1
+#     df = df[(df['story_after'] != '')].reset_index()
+#     target_highlighted = df['target'].apply(lambda x: f' *{x}*')
+#     df['input'] = df['dim'] + ': ' + df['story_before'].str.strip() + target_highlighted
+#     df['output'] = df['output_orig']
+#     return df
 
 def format_for_t5(df, is_test=False):
     def rename_NL(col):
