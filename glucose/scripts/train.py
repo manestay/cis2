@@ -10,10 +10,11 @@ import logging
 import datasets
 import numpy as np
 import transformers
-from transformers import AutoTokenizer, T5ForConditionalGeneration, Trainer, TrainingArguments, DataCollatorWithPadding
+from transformers import T5ForConditionalGeneration, Trainer, TrainingArguments, DataCollatorWithPadding
 import wandb
 
 from local_vars import GLUCOSE_DIR, SAVE_DIR, EXP_NUMS, SEED
+from utils import load_tokenizer
 
 parser = argparse.ArgumentParser()
 parser.add_argument('exp_num', choices=EXP_NUMS)
@@ -22,27 +23,45 @@ parser.add_argument('--dataset_dir')
 parser.add_argument('--seed', type=int, default=SEED)
 parser.add_argument('--model_size', '-m', default='t5-base')
 parser.add_argument('--no_shuffle', dest='shuffle', action='store_false')
-parser.add_argument('--eval_bleu', action='store_true') # extremely slow!
+parser.add_argument('--eval_bleu', action='store_true')
 parser.add_argument('--batch_size_train', '-bst', type=int, default=0)
 parser.add_argument('--batch_size_eval', '-bse', type=int, default=0)
 
 parser.add_argument('--no_logging', dest='logging', action='store_false')
 
-metric = datasets.load_metric('bleu', keep_in_memory=True)
-def compute_metrics(eval_pred):
+metric = datasets.load_metric('sacrebleu', keep_in_memory=True)
+
+
+def compute_sacrebleu(eval_pred):
+    # This BLEU evaluation is not the same as the one for evaluation, since we do not consider
+    # specific and general statements separately. We do 1 BLEU calculation for speed.
     logits, labels = eval_pred
-    predictions = np.argmax(logits, axis=-1)
-    d = metric.compute(predictions=predictions, references=labels)
-    output_dict = {'bleu': d['bleu']}
+    pred_ids = np.argmax(logits[0], axis=-1)
+    preds = [tokenizer.decode(x, skip_special_tokens=True) for x in pred_ids]
+    refs = [[tokenizer.decode(x, skip_special_tokens=True)] for x in labels]
+
+    d = metric.compute(predictions=preds, references=refs)
+    output_dict = {'bleu': d['score']}
+    logging.info(output_dict)
     return output_dict
 
-def main(args, exp_name, tokenizer, ds_train, ds_val, batch_size_train, batch_size_eval, use_fp16):
-    transformers.trainer_utils.set_seed(args.seed)
 
-    print('before model')
+def main(args, exp_name, tokenizer, ds_train, ds_val, batch_size_train, batch_size_eval, use_fp16,
+         eval_bleu=False):
+    transformers.trainer_utils.set_seed(args.seed)
+    if eval_bleu:
+        eval_metric = 'eval_bleu'
+        compute_metrics = compute_sacrebleu
+        greater_is_better = True
+    else:
+        eval_metric = "eval_loss"
+        compute_metrics = None
+        greater_is_better = False
+
     model = T5ForConditionalGeneration.from_pretrained(
         args.model_size, cache_dir='/nlp/data/bryanli/.cache')
-    if args.exp_num == '2b':
+
+    if args.exp_num == '2b' or args.exp_num == 'A':
         model.resize_token_embeddings(len(tokenizer))
 
     if args.shuffle:
@@ -52,19 +71,19 @@ def main(args, exp_name, tokenizer, ds_train, ds_val, batch_size_train, batch_si
     # taken from GLUCOSE paper and T5 paper when possible
     training_args = TrainingArguments(
         output_dir=args.output_dir,
-        num_train_epochs=4,
+        num_train_epochs=3,
         per_device_train_batch_size=batch_size_train,
         per_device_eval_batch_size=batch_size_eval,
-        # prediction_loss_only=True, # If I need co compute only loss and not other metrics, setting this to true will use less RAM
-        evaluation_strategy='steps',  # Run evaluation every eval_steps
-        save_steps=1000,  # How often to save a checkpoint
-        logging_steps=1000,  # How often to log loss to wandb
-        save_total_limit=5,  # Number of maximum checkpoints to save
-        remove_unused_columns=True,  # Removes useless columns from the dataset
-        run_name=exp_name,  # Wandb run name
-        load_best_model_at_end=True,  # Whether to load the best model found at each evaluation.
-        metric_for_best_model="eval_loss",  # Use loss to evaluate best model.
-        greater_is_better=False,  # Best model is the one with the lowest loss, not highest.
+        # prediction_loss_only=True,
+        evaluation_strategy='steps',
+        save_steps=2000,
+        logging_steps=2000,
+        save_total_limit=5,
+        remove_unused_columns=True,
+        run_name=exp_name,
+        load_best_model_at_end=True,
+        metric_for_best_model=eval_metric,
+        greater_is_better=greater_is_better,
         seed=args.seed,
         eval_accumulation_steps=20,
         fp16=use_fp16
@@ -75,15 +94,16 @@ def main(args, exp_name, tokenizer, ds_train, ds_val, batch_size_train, batch_si
     optimizer = transformers.Adafactor(model.parameters(), lr=0.0001,
                                        relative_step=False, warmup_init=False, scale_parameter=False,
                                        decay_rate=0.0, clip_threshold=1.0)
-    scheduler = None
 
+    # optimizer = transformers.Adafactor(model.parameters(), lr=0.001, relative_step=False, warmup_init=False,
+    #                                    scale_parameter=True, decay_rate=0.0, clip_threshold=1.0)
+    scheduler = None
 
     data_collator = DataCollatorWithPadding(
         tokenizer, pad_to_multiple_of=8) if training_args.fp16 else None
 
     print("padding to multiple of 8 for fp16" if data_collator else "not fp16")
 
-    print('before trainer')
     trainer = Trainer(
         model=model,
         args=training_args,
@@ -91,7 +111,8 @@ def main(args, exp_name, tokenizer, ds_train, ds_val, batch_size_train, batch_si
         eval_dataset=ds_val,
         optimizers=(optimizer, scheduler),
         compute_metrics=compute_metrics,
-        callbacks=[transformers.EarlyStoppingCallback(early_stopping_patience=5)]
+        data_collator=data_collator,
+        callbacks=[transformers.EarlyStoppingCallback(early_stopping_patience=10)]
     )
 
     trainer.args._n_gpu = 2
@@ -105,11 +126,7 @@ if __name__ == "__main__":
         logging.basicConfig(level=logging.DEBUG)
 
     # load tokenizer and datasets from disk
-    tokenizer = AutoTokenizer.from_pretrained(args.model_size)
-
-    if args.exp_num == '2b':
-        special_tokens_dict = {'additional_special_tokens': ['<mask_sent>']}
-        add_toks = tokenizer.add_special_tokens(special_tokens_dict)
+    tokenizer = load_tokenizer(args.model_size, args.exp_num)
 
     exp_name = f'exp{args.exp_num}_{args.model_size}'
     if not args.output_dir:
@@ -119,27 +136,27 @@ if __name__ == "__main__":
 
     logging.debug(f'loading datasets from from {args.dataset_dir}...')
     ds_train = datasets.load_from_disk(f'{args.dataset_dir}/ds_train')
-    ds_val = datasets.load_from_disk(f'{args.dataset_dir}/ds_val')
+    if args.eval_bleu: # evaluating BLEU takes a long time, use small set
+        ds_val = datasets.load_from_disk(f'{args.dataset_dir}/ds_val_small')
+    else:
+        ds_val = datasets.load_from_disk(f'{args.dataset_dir}/ds_val')
     logging.debug(f'example from train:')
     logging.debug(f'{tokenizer.decode(ds_train[200]["input_ids"])}')
     logging.debug(f'{tokenizer.decode(ds_train[200]["labels"])}')
     if args.model_size == 't5-large':
-        batch_size_train = args.batch_size_train or 4
-        batch_size_eval = args.batch_size_eval or (12 if args.eval_bleu else 2)
+        batch_size_train = args.batch_size_train or 8
+        batch_size_eval = args.batch_size_eval or 12
         use_fp16 = False
     elif args.model_size == 't5-base':
         batch_size_train = args.batch_size_train or 30
-        batch_size_eval = args.batch_size_eval or (30 if not args.eval_bleu else 10)
+        batch_size_eval = args.batch_size_eval or 30
         use_fp16 = True
     else:
         print('invalid model size!')
         os.exit()
-    if not args.eval_bleu:
-        compute_metrics = None
-    print(batch_size_eval, batch_size_train)
     print(args)
 
     # wandb.login()
     wandb.init(project="glucose_hf", name=exp_name, id=wandb.util.generate_id())
-    print('before main')
-    main(args, exp_name, tokenizer, ds_train, ds_val, batch_size_train, batch_size_eval, use_fp16=use_fp16)
+    main(args, exp_name, tokenizer, ds_train, ds_val, batch_size_train, batch_size_eval,
+         use_fp16=use_fp16, eval_bleu=args.eval_bleu)
