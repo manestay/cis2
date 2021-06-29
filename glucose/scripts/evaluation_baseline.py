@@ -41,10 +41,15 @@ def main(submissions_path, key_path, count_escaped=False, all_checkpoints=False)
     empty_loc = empty.name
     if all_checkpoints:
         itr = glob.glob(os.path.join(submissions_path, "**/predictions_test.csv"))
+        name_ind = -2
+    elif submissions_path.endswith('.csv'):
+        itr = [submissions_path]
+        name_ind = -1
     else:
         itr = [os.path.join(submissions_path, 'model/predictions_test.csv')]
+        name_ind = -3
     for path in itr:
-        model_name = path.rsplit('/', 3)[-3]
+        model_name = path.rsplit('/', 3)[name_ind]
         print(f'processing {model_name}...')
         df_generation = pd.read_csv(path, encoding="utf-8")
 

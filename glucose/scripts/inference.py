@@ -18,12 +18,13 @@ from transformers import T5ForConditionalGeneration, AutoTokenizer
 from transformers.trainer_utils import set_seed
 
 from local_vars import GLUCOSE_DIR, SAVE_DIR
-from utils import to_canonical
+from utils import to_canonical, load_tokenizer
 
 parser = argparse.ArgumentParser()
 parser.add_argument('exp_num', type=str)
 parser.add_argument('--model_dir', '-md')
 parser.add_argument('--model_size', '-ms')
+parser.add_argument('--out_path', '-o') # does not work with --all_checkpoints
 parser.add_argument('--dataset_dir', '-d', help='the dataset dir, saved by datasets.save_to_disk')
 
 parser.add_argument('--batch_size', '-bs', default=384, type=int)
@@ -116,7 +117,7 @@ if __name__ == "__main__":
 
     ds_val.set_format(type='torch', columns=cols, device='cuda')
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_size)
+    tokenizer = load_tokenizer(args.model_size, args.exp_num)
 
     if args.all_checkpoints:
         ckpts = [x for x in model_path.glob('*/') if x.is_dir()]
@@ -133,11 +134,11 @@ if __name__ == "__main__":
         model_ft = model_ft.cuda()
         print(f'running inference...')
         pred = run_inference(ds_val, model_ft, tokenizer, args.exp_num, args.batch_size, args.seed)
-        out_path = folder_name / f"predictions{suffix}.csv"
+        out_path = args.out_path or folder_name / f"predictions{suffix}.csv"
         pred.to_csv(out_path, index=False)
         print(f'saved to {out_path}')
         if args.canonical:
-            out_path_canon = folder_name / f"predictions_canonical{suffix}.csv"
+            out_path_canon = args.out_path or folder_name / f"predictions_canonical{suffix}.csv"
             pred = to_canonical(pred)
             pred.to_csv(out_path_canon, index=False)
             print(f'saved canonical to {out_path_canon}')
