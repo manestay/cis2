@@ -12,9 +12,13 @@ import re
 import datasets
 import pandas as pd
 from sklearn import model_selection
-from transformers import AutoTokenizer
+from tqdm import tqdm
+from nltk.tokenize import sent_tokenize
 
 from local_vars import EXP_NUMS, SAVE_DIR, TRAIN_PATH, TEST_PATH, BATCH_SIZE_ENCODE, COLS_TO_FORMAT, SEED
+from utils import split_output, select_most_likely, load_tokenizer
+
+tqdm.pandas()
 
 parser = argparse.ArgumentParser()
 parser.add_argument('exp_num', choices=EXP_NUMS)
@@ -22,7 +26,7 @@ parser.add_argument('--train_path', default=TRAIN_PATH)
 parser.add_argument('--test_path', default=TEST_PATH)
 parser.add_argument('--seed', type=int, default=SEED)
 parser.add_argument('--split_val', action='store_true',
-                   help='split a validation set from train (deprecated)')
+                    help='split a validation set from train (deprecated)')
 parser.add_argument('--val_ids', default=None, help='specify story IDs to use as the validation set. '
                     'Supersedes --split_val if both are used.')
 
@@ -33,6 +37,7 @@ parser.add_argument('--dataset_dir')
 parser.add_argument('--model_size', '-ms', default='t5-base')
 parser.add_argument('--out_location', default=SAVE_DIR)
 parser.set_defaults(val_ids=f'{SAVE_DIR}/val_ids.txt')
+
 
 def get_src_tgt_len(source_text, target_text, tokenizer):
     tokenized_source_text = tokenizer(list(source_text), truncation=False, padding=False)
@@ -49,62 +54,14 @@ def get_src_tgt_len(source_text, target_text, tokenizer):
             max_target = len(item)
     return max_source, max_target
 
+
 def encode(batch, tokenizer, max_source, max_target):
     inp = tokenizer(batch['input'], padding='max_length', truncation=True, max_length=max_source)
     if 'output' in batch:
-        outp = tokenizer(batch['output'], padding='max_length', truncation=True, max_length=max_target)
+        outp = tokenizer(batch['output'], padding='max_length',
+                         truncation=True, max_length=max_target)
         inp['labels'] = outp['input_ids']
     return inp
-
-def preprocess(args):
-    # format data for the given experiment
-    logging.debug(f'formatting data for experiment {args.exp_num}')
-    df_train, df_val, ids_val = format_data(args.train_path, args.exp_num, val_ids=args.val_ids, seed=args.seed)
-    df_test, _, _ = format_data(args.test_path, args.exp_num, split_val=False, seed=args.seed, is_test=True)
-
-    logging.debug(f"size of train: {len(df_train)}")
-    logging.debug(f"size of validation: {len(df_val)}")
-
-    ex = df_train.iloc[200]
-    logging.debug('sample input/output:')
-    logging.debug(f'input: {ex["input"]}')
-    logging.debug(f'output: {ex["output"]}')
-
-    # tokenize the data
-    logging.debug(f'loading tokenizer for {args.model_size}')
-    tokenizer = AutoTokenizer.from_pretrained(args.model_size)
-
-    if args.exp_num == '2b':
-        special_tokens_dict = {'additional_special_tokens': ['<mask_sent>']}
-        add_toks = tokenizer.add_special_tokens(special_tokens_dict)
-
-    ds_train = datasets.Dataset.from_pandas(df_train)
-    ds_val = datasets.Dataset.from_pandas(df_val)
-    ds_test = datasets.Dataset.from_pandas(df_test)
-
-    logging.debug('calculating max sequence length...')
-    max_source, max_target = get_src_tgt_len(df_train['input'], df_train['output'], tokenizer)
-    logging.debug(f'number of tokens:\nmax input tokens: {max_source}\nmax output tokens: {max_target}')
-
-    logging.debug('tokenizing datasets...')
-    kwargs = dict(max_source=max_source, max_target=max_target, tokenizer=tokenizer)
-    ds_train = ds_train.map(encode, batched=True, batch_size=BATCH_SIZE_ENCODE, fn_kwargs=kwargs)
-    ds_val = ds_val.map(encode, batched=True, batch_size=BATCH_SIZE_ENCODE, fn_kwargs=kwargs)
-    ds_test = ds_test.map(encode, batched=True, batch_size=BATCH_SIZE_ENCODE, fn_kwargs=kwargs)
-
-    ds_train.set_format(type='torch', columns=COLS_TO_FORMAT)
-    ds_val.set_format(type='torch', columns=COLS_TO_FORMAT)
-    ds_test.set_format(type='torch', columns=[x for x in COLS_TO_FORMAT if x != 'labels'])
-
-    # verify proper encoding
-    logging.debug('example text after encoding and decoding:')
-    logging.debug(tokenizer.decode(ds_train[200]['input_ids']))
-    logging.debug(tokenizer.decode(ds_train[200]['labels']))
-
-    logging.debug(f'saving tokenized datasets to disk at {args.dataset_dir}')
-    ds_train.save_to_disk(f'{args.dataset_dir}/ds_train')
-    ds_val.save_to_disk(f'{args.dataset_dir}/ds_val')
-    ds_test.save_to_disk(f'{args.dataset_dir}/ds_test')
 
 
 def get_in_out_df(df, exp_num):
@@ -116,8 +73,8 @@ def get_in_out_df(df, exp_num):
         return get_in_out_df_exp2b(df)
     elif exp_num == '3a':
         return get_in_out_df_exp3a(df)
-    # elif exp_num == '3b':
-    #     return get_in_out_df_exp3b(df)
+    elif exp_num == 'A':
+        return get_in_out_df_expA(df)
     else:
         print('invalid exp num!')
 
@@ -150,77 +107,25 @@ def get_in_out_df_exp2b(df):
 def get_in_out_df_exp3a(df):
     # after instead of before, since we have at least 1
     df = df[(df['story_after'] != '')].reset_index()
-    target_highlighted = df['target'].apply(lambda x: f' *{x}*')
-    df['input'] = df['dim'] + ': ' + df['story_before'].str.strip() + target_highlighted
+    target_highlighted = df['target'].apply(lambda x: f'*{x}*')
+    df['input'] = df['dim'] + ': ' + df['story_before'] + target_highlighted
     df['output'] = df['output_orig']
     return df
 
 
-# def get_in_out_df_exp3b(df):
-#     # after instead of before, since we have at least 1
-#     df = df[(df['story_after'] != '')].reset_index()
-#     target_highlighted = df['target'].apply(lambda x: f' *{x}*')
-#     df['input'] = df['dim'] + ': ' + df['story_before'].str.strip() + target_highlighted
-#     df['output'] = df['output_orig']
-#     return df
-
-def format_for_t5(df, is_test=False):
-    def rename_NL(col):
-        if not col[0].isdigit():
-            return col
-        if col[0:2] == '10':
-            return f"{col[3:]}_{col[0:2]}"
-        return f"{col[2:]}_{col[0]}"
-
-    df = df.rename(columns=lambda x: rename_NL(x))
-    rows_expanded = []
-
-    for row in df.itertuples():
-        for i in range(1, 11):
-            row_ex = []
-            if is_test:
-                row_ex.append(row.unique_id)
-                row_ex.append(row.unique_id.split("__", 1)[0])
-            if not is_test:
-                row_ex.append(row.experiment_id)
-                row_ex.append(row.story_id)
-
-            specific_name = f"specificNL_{i}"
-            general_name = f"generalNL_{i}"
-            specific = getattr(row, specific_name)
-            general = getattr(row, general_name)
-            if specific == 'escaped' or general == 'escaped':
-                continue
-
-            story = row.story.replace('****', ' ') # test has this
-            selected_sentence = row.selected_sentence
-            escaped = re.escape(selected_sentence)
-            story = re.sub(escaped, f"*{selected_sentence}*", story, 1)
-            story = f"#{i}: {story}"
-            row_ex.append(story)
-            # assert story.count("*") == 2
-
-            if is_test:
-                for specific_st, general_st in zip(specific.split("****"), general.split("****")):
-                    row_ex.append(specific_st)
-                    row_ex.append(general_st)
-            else:
-                row_ex.append(specific)
-                row_ex.append(general)
-
-            rows_expanded.append(row_ex)
-
-    if is_test:
-        COLS = ['experiment_id', 'story_id', 'input', 'specific_ref1', 'general_ref1', 'specific_ref2', 'general_ref2',
-                'specific_ref3', 'general_ref3']
-        df_expanded = pd.DataFrame(rows_expanded, columns=COLS)
-        df_expanded['output'] = df_expanded['specific_ref1'] + ' ** ' + df_expanded['general_ref1']
-
-    else:
-        COLS = ['experiment_id', 'story_id', 'input', 'specific', 'general']
-        df_expanded = pd.DataFrame(rows_expanded, columns=COLS)
-        df_expanded['output'] = df_expanded['specific'] + ' ** ' + df_expanded['general']
-    return df_expanded
+def get_in_out_df_expA(df):
+    # A stands for "abstract", as in abstracted away from language generation
+    # in this setting, we generate outputs of the form <sX> >Relation> <sY>
+    # we consider the specific relationship to create these 3-token sequences
+    num_sents = df['sents'].apply(len)
+    df = df[num_sents == 5].copy() # skip examples with bad punctuation
+    split_output(df, 'output_orig')
+    print('heuristically calculating expA labels')
+    df['output'] = df.progress_apply(select_most_likely, axis=1)
+    # after instead of before, since we have at least 1
+    target_highlighted = df['target'].apply(lambda x: f'*{x}*')
+    df['input'] = df['dim'] + ': ' + df['story_before'] + target_highlighted + df['story_after']
+    return df
 
 
 def split_contexts(df):
@@ -239,28 +144,108 @@ def split_contexts(df):
     story = story_before + target_sentence + story_after
     story_id = df['story_id']
     experiment_id = df['experiment_id']
+    selected_index = df['selected_index']
     d = {'dim': dim, 'story_before': story_before, 'target': target_sentence,
          'story_after': story_after, 'story': story, 'story_id': story_id,
-         'experiment_id': experiment_id, 'output_orig': X_output}
+         'experiment_id': experiment_id, 'output_orig': X_output, 'selected_index': selected_index,
+         'sents': df['sents']}
     df_new = pd.DataFrame(d)
     return df_new
 
 
-def manual_fix(df_train):
+def manual_fix(df_train, is_test):
+    # clean up consecutive spaces
+    df_train['input'] = df_train['input'].str.replace(r'\s\s+', ' ', regex=True)
+    df_train['output'] = df_train['output'].str.replace(r'\s\s+', ' ', regex=True)
+    if is_test:
+        return
+
     bad_index = df_train['output'][df_train['output'].str.match(".*foodd.*\)")].index[0]
     old = df_train.loc[bad_index]['output']
     # remove random letters at end of example 4744
     fixed = re.sub(r'foodd.*\)', 'food)', old)
     df_train.loc[bad_index, 'output'] = fixed
 
-    # clean up consecutive spaces
-    df_train['input'] = df_train['input'].str.replace(r'\s\s+', ' ', regex=True)
-    df_train['output'] = df_train['output'].str.replace(r'\s\s+', ' ', regex=True)
 
     # some inputs are all capitalized -- change them to lower so BPE works
     all_upper = df_train['input'].apply(lambda x: not any(char.islower() for char in x))
     all_upper_ind = df_train[all_upper].loc[:, 'input'].index
     df_train.loc[all_upper_ind, 'input'] = df_train.loc[all_upper_ind, 'input'].str.lower()
+
+
+def format_for_t5(df, is_test=False, split_sents=False):
+    def rename_NL(col):
+        if not col[0].isdigit():
+            return col
+        if col[0:2] == '10':
+            return f"{col[3:]}_{col[0:2]}"
+        return f"{col[2:]}_{col[0]}"
+
+    df = df.rename(columns=lambda x: rename_NL(x))
+    rows_expanded = []
+
+    for row in tqdm(df.itertuples(), total=len(df)):
+        for i in range(1, 11):
+            row_ex = []
+            if is_test:
+                row_ex.append(row.unique_id)
+                row_ex.append(row.unique_id.split("__", 1)[0])
+            if not is_test:
+                row_ex.append(row.experiment_id)
+                row_ex.append(row.story_id)
+
+            specific_name = f"specificNL_{i}"
+            general_name = f"generalNL_{i}"
+            specific = getattr(row, specific_name)
+            general = getattr(row, general_name)
+            if specific == 'escaped' or general == 'escaped':
+                continue
+
+            if is_test:
+                sents = row.story.split('****') if split_sents else []
+                story = row.story.replace('****', ' ')  # test has this
+            else:
+                sents = sent_tokenize(row.story) if split_sents else []
+                # assert len(sents) == 5 # there are some misformatted inputs so can't assert
+                story = row.story
+
+            selected_sentence = row.selected_sentence
+            escaped = re.escape(selected_sentence)
+            story = re.sub(escaped, f"*{selected_sentence}*", story, 1)
+            story = f"#{i}: {story}"
+            row_ex.append(story)
+            # assert story.count("*") == 2
+
+            if is_test:
+                for specific_st, general_st in zip(specific.split("****"), general.split("****")):
+                    row_ex.append(specific_st)
+                    row_ex.append(general_st)
+                selected_sentence_index = -1
+                if split_sents:
+                    selected_sentence_index = sents.index(selected_sentence)
+                    assert selected_sentence_index != -1
+                row_ex.append(selected_sentence_index)
+
+            else:
+                row_ex.append(specific)
+                row_ex.append(general)
+                row_ex.append(row.selected_sentence_index)
+            row_ex.append(sents)
+
+            rows_expanded.append(row_ex)
+
+    if is_test:
+        COLS = ['experiment_id', 'story_id', 'input', 'specific_ref1', 'general_ref1', 'specific_ref2', 'general_ref2',
+                'specific_ref3', 'general_ref3', 'selected_index', 'sents']
+        df_expanded = pd.DataFrame(rows_expanded, columns=COLS)
+        df_expanded['output'] = df_expanded['specific_ref1'] + ' ** ' + df_expanded['general_ref1']
+
+    else:
+        COLS = ['experiment_id', 'story_id', 'input',
+                'specific', 'general', 'selected_index', 'sents']
+        df_expanded = pd.DataFrame(rows_expanded, columns=COLS)
+        df_expanded['output'] = df_expanded['specific'] + ' ** ' + df_expanded['general']
+    return df_expanded
 
 
 def format_data(train_path, exp_num, split_val=False, val_ids=None, seed=0, is_test=False):
@@ -269,11 +254,12 @@ def format_data(train_path, exp_num, split_val=False, val_ids=None, seed=0, is_t
     exp_num = str(exp_num)
     df_train_orig = pd.read_csv(train_path)
     logging.debug(f"loaded original train CSV {train_path} ({len(df_train_orig)} rows)")
+    split_sents = True if exp_num == 'A' else False
 
-    df_train_ex = format_for_t5(df_train_orig, is_test=is_test)
-    if not is_test:
-        manual_fix(df_train_ex)
-    logging.debug(f"expanded each experiment to 1 dimension per row {train_path} ({len(df_train_ex)} rows)")
+    df_train_ex = format_for_t5(df_train_orig, is_test=is_test, split_sents=split_sents)
+    manual_fix(df_train_ex, is_test)
+    logging.debug(
+        f"expanded each experiment to 1 dimension per row {train_path} ({len(df_train_ex)} rows)")
     if val_ids:
         logging.debug(f'loading validation ids from {val_ids}...')
         with open(val_ids) as f:
@@ -291,7 +277,7 @@ def format_data(train_path, exp_num, split_val=False, val_ids=None, seed=0, is_t
         df_val_ex = None
         ids_val = []
 
-    if exp_num == '0': # original task, just return
+    if exp_num == '0':  # original task, just return
         return df_train_ex, df_val_ex, ids_val
 
     # else we need to reformat
@@ -309,6 +295,59 @@ def format_data(train_path, exp_num, split_val=False, val_ids=None, seed=0, is_t
     if split_val or val_ids:
         df_val1 = get_in_out_df(df_val, exp_num)
     return df_train1, df_val1, ids_val
+
+
+def preprocess(args):
+    # format data for the given experiment
+    logging.debug(f'formatting data for experiment {args.exp_num}')
+    df_train, df_val, ids_val = format_data(
+        args.train_path, args.exp_num, val_ids=args.val_ids, seed=args.seed)
+    df_test, _, _ = format_data(args.test_path, args.exp_num,
+                                split_val=False, seed=args.seed, is_test=True)
+    df_train, df_val, df_test = df_train.drop('sents', axis=1), df_val.drop('sents', axis=1), df_test.drop('sents', axis=1)
+
+    logging.debug(f"size of train: {len(df_train)}")
+    logging.debug(f"size of validation: {len(df_val)}")
+
+    ex = df_train.iloc[200]
+    logging.debug('sample input/output:')
+    logging.debug(f'input: {ex["input"]}')
+    logging.debug(f'output: {ex["output"]}')
+
+    # tokenize the data
+    logging.debug(f'loading tokenizer for {args.model_size}')
+    tokenizer = load_tokenizer(args.model_size, args.exp_num)
+
+    ds_train = datasets.Dataset.from_pandas(df_train)
+    ds_val = datasets.Dataset.from_pandas(df_val)
+    ds_test = datasets.Dataset.from_pandas(df_test)
+
+    logging.debug('calculating max sequence length...')
+    max_source, max_target = get_src_tgt_len(df_train['input'], df_train['output'], tokenizer)
+    logging.debug(
+        f'number of tokens:\nmax input tokens: {max_source}\nmax output tokens: {max_target}')
+
+    logging.debug('tokenizing datasets...')
+    kwargs = dict(max_source=max_source, max_target=max_target, tokenizer=tokenizer)
+    ds_train = ds_train.map(encode, batched=True, batch_size=BATCH_SIZE_ENCODE, fn_kwargs=kwargs)
+    ds_val = ds_val.map(encode, batched=True, batch_size=BATCH_SIZE_ENCODE, fn_kwargs=kwargs)
+    ds_test = ds_test.map(encode, batched=True, batch_size=BATCH_SIZE_ENCODE, fn_kwargs=kwargs)
+
+    ds_train.set_format(type='torch', columns=COLS_TO_FORMAT)
+    ds_val.set_format(type='torch', columns=COLS_TO_FORMAT)
+    ds_test.set_format(type='torch', columns=[x for x in COLS_TO_FORMAT if x != 'labels'])
+
+    # verify proper encoding
+    logging.debug('example text after encoding and decoding:')
+    logging.debug(tokenizer.decode(ds_train[200]['input_ids']))
+    logging.debug(tokenizer.decode(ds_train[200]['labels']))
+
+    logging.debug(f'saving tokenized datasets to disk at {args.dataset_dir}')
+    ds_train.save_to_disk(f'{args.dataset_dir}/ds_train')
+    ds_val.save_to_disk(f'{args.dataset_dir}/ds_val')
+    # ds_val.save_to_disk(f'{args.dataset_dir}/ds_val_small')
+    ds_test.save_to_disk(f'{args.dataset_dir}/ds_test')
+
 
 if __name__ == "__main__":
     args = parser.parse_args()

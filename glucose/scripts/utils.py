@@ -83,7 +83,9 @@ def load_tokenizer(model_size, exp_num):
 ## functions for working with the results df
 def get_all_results_df(path):
     if not os.path.exists(path):
-        return None
+        df = pd.DataFrame([], columns=RESULTS_COLS)
+        df.set_index(['model', 'split', 'is_baseline'], inplace=True)
+        return df
 
     df = pd.read_csv(path, sep='\t')
     df.set_index(['model', 'split', 'is_baseline'], inplace=True)
@@ -92,20 +94,14 @@ def get_all_results_df(path):
 def add_results_row(df, row):
     if isinstance(row, dict):
         row = [row[x] for x in RESULTS_COLS]
-    if df is None:
-        df = pd.DataFrame([row], columns=RESULTS_COLS)
-        df.set_index(['model', 'split', 'is_baseline'], inplace=True)
-        return df
 
     idx = tuple(row[0:3])
     row_scores = row[3:]
     if idx in df.index:
-        action = input(f'overwrite {idx} in results df? (y/n,  or enter suffix beginning with _)')
-        print(f'action is {action}')
+        action = input(f'overwrite {idx} in results df? (y/n,  or enter suffix beginning with _)\n')
         if action == 'y':
             pass
         elif action.startswith('_'):
-            print('hi')
             idx = tuple([row[0] + action] + row[1:3])
         else:
             return df

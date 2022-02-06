@@ -5,7 +5,7 @@
 
 MODEL_SIZE=t5-large
 # set GPUS appropriately
-GPUS=4,5
+GPUS=0,1
 
 if [ $MODEL_SIZE == "t5-large" ]; then
     BATCH_SIZE=8
@@ -15,27 +15,27 @@ else
     BATCH_SIZE_INF=300
 fi
 
-# 0 1 2a 2b 3a
-for EXP_NUM in 3a; do
+# 0 1 2a 2b 3a A
+for EXP_NUM in 0 1 2a 2b 3a A; do
     EXP_NAME=exp${EXP_NUM}_${MODEL_SIZE}
 
-    python scripts/preprocess.py $EXP_NUM -ms $MODEL_SIZE
+    # python scripts/preprocess.py $EXP_NUM -ms $MODEL_SIZE --val_ids data/val_ids_small.txt
 
-    CUDA_VISIBLE_DEVICES=${GPUS} python scripts/train.py $EXP_NUM -m $MODEL_SIZE -bse $BATCH_SIZE -bst $BATCH_SIZE
+    # CUDA_VISIBLE_DEVICES=${GPUS} python scripts/train.py $EXP_NUM -m $MODEL_SIZE --eval_bleu -bse 6 -bst $BATCH_SIZE
 
     ## by default, runs inference on validation
-    CUDA_VISIBLE_DEVICES=${GPUS} python scripts/inference.py $EXP_NUM -ms $MODEL_SIZE \
-        --batch_size $BATCH_SIZE_INF
-    python scripts/evaluation.py $EXP_NUM -ms $MODEL_SIZE
+    # CUDA_VISIBLE_DEVICES=${GPUS} python scripts/inference.py $EXP_NUM -ms $MODEL_SIZE \
+    #     --batch_size $BATCH_SIZE_INF
+    # ## specify -d to run inference on test dataset
+    # CUDA_VISIBLE_DEVICES=${GPUS} python scripts/inference.py $EXP_NUM -ms $MODEL_SIZE \
+    #     -d data/${EXP_NAME}/ds_test  --batch_size $BATCH_SIZE_INF
 
+    python scripts/evaluation.py $EXP_NUM -ms $MODEL_SIZE
     ## for evaluating test, we use an adapted version of the GLUCOSE original evaluation script.
-    ## specify -d to run inference on test dataset
-    CUDA_VISIBLE_DEVICES=${GPUS} python scripts/inference.py $EXP_NUM -ms $MODEL_SIZE \
-        -d data/${EXP_NAME}/ds_test  --batch_size $BATCH_SIZE_INF
     python scripts/evaluation.py $EXP_NUM -ms $MODEL_SIZE -i outputs/${EXP_NAME}/model/predictions_test.csv
 
     ## evaluate baseline only for original experiment (exp0)
     if [ "$EXP_NUM" == "0" ]; then
-        python scripts/evaluation_baseline.py -s outputs/${EXP_NAME}/
+        python scripts/evaluation_baseline.py -s outputs/${EXP_NAME}/ -ce
     fi
 done
