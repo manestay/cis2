@@ -1,9 +1,9 @@
 # Adapted from test/evaluate_GLUCOSE_submissions.ipynb.
+# NOTE: to evaluate the same way as the original paper, specify --count_escaped
 
 import argparse
 import glob
 import os
-import re
 from collections import defaultdict
 
 import pandas as pd
@@ -22,8 +22,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--submission_path', '-s', default=submissions_path)
 parser.add_argument('--key_path', '-k', default=key_file_path)
 parser.add_argument('--count_escaped', '-ce', action='store_true',
-                    help='count `escaped` in the BLEU calucation. This is the original behavior, '
-                         'but we consider it incorrect.')
+                    help='count `escaped` in the BLEU calucation. This is the original behavior.')
 parser.add_argument('--all_checkpoints', action='store_true', help='evaluate all checkpoints')
 parser.add_argument('--all_results', default=ALL_RESULTS_PATH, help='path to JSON with all results')
 
@@ -57,11 +56,18 @@ def main(submissions_path, key_path, count_escaped=False, all_checkpoints=False)
             # convert to canonical format if needed
             df_generation = to_canonical(df_generation)
 
-        bleu_avg_gen = 0 # accumulate BLEU scores
+        # accumulate BLEU scores
+        bleu_avg_gen = 0
         bleu_avg_spec = 0
+        bleu_avg_gen_15 = 0
+        bleu_avg_spec_15 = 0
+        bleu_avg_gen_610 = 0
+        bleu_avg_spec_610 = 0
         test_size = 0 # count number of examples
+        test_size_15 = 0
         for dim in range(10):
             dim = dim + 1
+
             for mode in ["specific", "general"]:
                 predictions = df_generation[str(dim)+"_"+mode+"NL"].values
                 predictions = np.insert(predictions, empty_loc, "escaped")
@@ -93,15 +99,31 @@ def main(submissions_path, key_path, count_escaped=False, all_checkpoints=False)
                 bleu = sacrebleu.corpus_bleu(predictions, references).score
                 model_evaluation_results["dim"+str(dim)][mode][model_name]["bleu"] = bleu
                 preds_in_dim = len(predictions)
-                if mode == 'general':
-                    bleu_avg_gen += bleu * preds_in_dim
-                elif mode == 'specific':
+                if mode == 'specific':
                     bleu_avg_spec += bleu * preds_in_dim
+                    if dim <= 5: # 1-5
+                        bleu_avg_spec_15 += bleu * preds_in_dim
+                    else: # 6-10
+                        bleu_avg_spec_610 += bleu * preds_in_dim
+                elif mode == 'general':
+                    bleu_avg_gen += bleu * preds_in_dim
+                    if dim <= 5: # 1-5
+                        bleu_avg_gen_15 += bleu * preds_in_dim
+                    else: # 6-10
+                        bleu_avg_gen_610 += bleu * preds_in_dim
             test_size += preds_in_dim
+            if dim <= 5:
+                test_size_15 += preds_in_dim
             # print(f'{preds_in_dim} in dimension {dim}')
         print(f'tested {test_size} total')
-        model_evaluation_results["avg"]['general'][model_name]["bleu"] = bleu_avg_gen / test_size
+        test_size_610 = test_size - test_size_15
         model_evaluation_results["avg"]['specific'][model_name]["bleu"] = bleu_avg_spec / test_size
+        model_evaluation_results["avg"]['general'][model_name]["bleu"] = bleu_avg_gen / test_size
+
+        model_evaluation_results["avg1-5"]['specific'][model_name]["bleu"] = bleu_avg_spec_15 / test_size_15
+        model_evaluation_results["avg6-10"]['specific'][model_name]["bleu"] = bleu_avg_spec_610 / test_size_610
+        model_evaluation_results["avg1-5"]['general'][model_name]["bleu"] = bleu_avg_gen_15 / test_size_15
+        model_evaluation_results["avg6-10"]['general'][model_name]["bleu"] = bleu_avg_gen_610 / test_size_610
     return model_evaluation_results
 
 

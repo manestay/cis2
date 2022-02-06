@@ -8,7 +8,7 @@ TRAIN_PATH = os.path.join(GLUCOSE_DIR, 'data/GLUCOSE_training_data_final.csv')
 TEST_PATH = os.path.join(GLUCOSE_DIR, 'data/nov27_key_final_copy.csv')
 ALL_RESULTS_PATH = os.path.join(GLUCOSE_DIR, 'outputs/all_results.tsv')
 
-EXP_NUMS = ['0', '1', '2a', '2b', '3a', '3b']
+EXP_NUMS = ['0', '1', '2a', '2b', '3a', 'A']
 
 COLS_TO_FORMAT = ['input_ids', 'labels', 'attention_mask']
 
@@ -21,5 +21,6 @@ CANONICAL_COLS = [
     '7_specificNL', '7_generalNL', '8_specificNL', '8_generalNL', '9_specificNL', '9_generalNL',
     '10_specificNL', '10_generalNL']
 
-RESULTS_COLS = ['model', 'split', 'is_baseline', 'general_avg', 'specific_avg'] + \
-    [f'general_dim{i}' for i in range(1, 11)] + [f'specific_dim{i}' for i in range(1, 11)]
+RESULTS_COLS = ['model', 'split', 'is_baseline', 'specific_avg', 'general_avg'] + \
+    [f'specific_dim{i}' for i in range(1, 11)] + [f'general_dim{i}' for i in range(1, 11)]
+RESULTS_COLS += ['specific_avg1-5', 'specific_avg6-10', 'general_avg1-5', 'general_avg6-10']
