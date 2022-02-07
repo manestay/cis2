@@ -1,13 +1,16 @@
 import os
 import re
+from functools import lru_cache
 
 import pandas as pd
-from nltk.tokenize import sent_tokenize
 from sacrebleu import sentence_bleu
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
 from local_vars import CANONICAL_COLS, RESULTS_COLS
+
+import nltk
+from nltk.corpus import wordnet
 
 tqdm.pandas()
 
@@ -113,21 +116,29 @@ def save_results_df(df, path, round=2):
         df = df.round(round)
     df.sort_index(inplace=True)
     df.to_csv(path, sep='\t')
-##
 
+##
+def find_sim(sent, other, mode='bleu'):
+    if mode == 'bleu':
+        return sentence_bleu(sent, [other]).score
 
 def select_most_likely(row):
-    # for the given row, generates the 3-token abstract sequence
+    # for the given row, generates the 3-token CIS^2 and the similarity score
     # it is most likely because we use BLEU as the heuristic to find the other sentence
-    sents = row['sents']
+
+    # sents = row['sents']
+    # spec = row["output_spec"]
+    sents = row['lemmatized']
+    spec = row['spec_lemmatized']
+
     sel_idx = row['selected_index'] # this is given from annotations
     dim = int(row['dim'].strip('#'))
     if 1 <= dim <= 5:
         other_pos, sel_pos = 0, 2
     else: # 6 to 10
         other_pos, sel_pos = 2, 0
-    relation = f'>{row["output_spec"][1]}>'
-    other = row['output_spec'][other_pos]
+    relation = f'>{spec[1]}>'
+    other = spec[other_pos]
     # use heuristic to find most likely match
     best_inp = ''
     best_idx = -1
@@ -135,7 +146,7 @@ def select_most_likely(row):
     for i, sent in enumerate(sents):
         if i == sel_idx: # can't select same sentence twice
             continue
-        score = sentence_bleu(sent, [other]).score
+        score = find_sim(sent, other, 'bleu')
         if score > best_score:
             best_inp = sent
             best_idx = i
@@ -144,14 +155,7 @@ def select_most_likely(row):
     rel = [None, relation, None]
     rel[other_pos] = f'<s{best_idx}>'
     rel[sel_pos] = f'<s{sel_idx}>'
-
-    # for i, sent in enumerate(sents):
-    #     print(f'{i} : {sent}')
-    # print(row['output_orig'])
-    # print(rel)
-    # input()
-
-    return ' '.join(rel)
+    return ' '.join(rel), round(best_score, 2)
 
 def split_output(df, output_label='output'):
     print('splitting outputs')
@@ -160,3 +164,39 @@ def split_output(df, output_label='output'):
     lens = output_spec.apply(len)
     assert lens.nunique() == 1 # with this split, shoudl always have len == 3
     df.loc[:, 'output_spec'] = output_spec
+
+####
+from nltk.stem import WordNetLemmatizer
+wnl = WordNetLemmatizer()
+lemmatize = lru_cache(maxsize=50000)(wnl.lemmatize)
+pos_tag = lru_cache(maxsize=50000)(nltk.pos_tag)
+
+def wordnet_pos(nltk_tag):
+    if nltk_tag.startswith('J'):
+        return wordnet.ADJ
+    elif nltk_tag.startswith('V'):
+        return wordnet.VERB
+    elif nltk_tag.startswith('N'):
+        return wordnet.NOUN
+    elif nltk_tag.startswith('R'):
+        return wordnet.ADV
+    else:
+        return None
+
+@lru_cache(maxsize=50000)
+def lemmatize_sent(sent):
+    pos_tagged = pos_tag(tuple(nltk.word_tokenize(sent)))
+    wordnet_tagged = list(map(lambda x: (x[0], wordnet_pos(x[1])), pos_tagged))
+    sent_lem = [lemmatize(word, tag) if tag else lemmatize(word) for word, tag in wordnet_tagged]
+    if len(sent_lem) and sent_lem[-1] == '.':
+        del sent_lem[-1]
+    sent_lem = ' '.join(sent_lem)
+
+    return sent_lem
+
+def lemmatize_sents(sents):
+    sents_lem = []
+    for sent in sents:
+        sent_lem = lemmatize_sent(sent)
+        sents_lem.append(sent_lem)
+    return sents_lem

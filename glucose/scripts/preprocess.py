@@ -16,7 +16,7 @@ from tqdm import tqdm
 from nltk.tokenize import sent_tokenize
 
 from local_vars import EXP_NUMS, SAVE_DIR, TRAIN_PATH, TEST_PATH, BATCH_SIZE_ENCODE, COLS_TO_FORMAT, SEED
-from utils import split_output, select_most_likely, load_tokenizer
+from utils import split_output, select_most_likely, load_tokenizer, lemmatize_sents
 
 tqdm.pandas()
 
@@ -36,6 +36,7 @@ parser.add_argument('--no_logging', dest='logging', action='store_false')
 parser.add_argument('--dataset_dir')
 parser.add_argument('--model_size', '-ms', default='t5-base')
 parser.add_argument('--out_location', default=SAVE_DIR)
+
 parser.set_defaults(val_ids=f'{SAVE_DIR}/val_ids.txt')
 
 
@@ -121,7 +122,9 @@ def get_in_out_df_expA(df):
     df = df[num_sents == 5].copy() # skip examples with bad punctuation
     split_output(df, 'output_orig')
     print('heuristically calculating expA labels')
-    df['output'] = df.progress_apply(select_most_likely, axis=1)
+    df['lemmatized'] = df['sents'].progress_apply(lemmatize_sents)
+    df['spec_lemmatized'] = df['output_spec'].progress_apply(lemmatize_sents)
+    df['output'], df['sim_score'] = zip(*df.progress_apply(select_most_likely, axis=1))
     # after instead of before, since we have at least 1
     target_highlighted = df['target'].apply(lambda x: f'*{x}*')
     df['input'] = df['dim'] + ': ' + df['story_before'] + target_highlighted + df['story_after']
