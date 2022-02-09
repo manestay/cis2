@@ -16,36 +16,35 @@ tqdm.pandas()
 def canonical_dict():
     return dict.fromkeys(CANONICAL_COLS)
 
+def get_story_id(row):
+    if 'story_id' in row:
+        story_id = row.story_id
+    else:
+        story_id = row.unique_id.split('__')[0]
+    return story_id
 
 def to_canonical(preds):
-    dim_story = preds['input'].str.split(": ", 1)
+    dim_story = preds['input'].str.split(":", 1)
     preds['dim'] = dim_story.str[0].str.lstrip("#")
-    preds['story'] = dim_story.str[1]
+    preds['story'] = dim_story.str[1].str.strip()
+    preds['story_id'] = preds.apply(get_story_id, axis=1)
 
-    story = ''
-    canon_row = canonical_dict()
+    canon_row = None
     canon_rows = []
-    seen = set()
+    unique_id_prev = None
+    preds = preds.sort_values('unique_id')
     for row in preds.itertuples():
-        if 'story_id' in row._fields:
-            story_id = row.story_id
-        else:
-            story_id = row.unique_id.split('__')[0]
-
-        if row.story != story:
-            if story:
+        if row.unique_id != unique_id_prev:
+            if canon_row:
                 for k, v in canon_row.items():
                     if not v:
                         canon_row[k] = 'escaped'
                 canon_rows.append(canon_row)
-                # assert story_id not in seen
-                seen.add(story_id)
 
             canon_row = canonical_dict()
-
+        unique_id_prev = row.unique_id
         # now we add to each row
-        story = row.story
-        canon_row['story_id'] = story_id
+        canon_row['story_id'] = row.story_id
         canon_row['unique_id'] = row.unique_id
         general = f'{row.dim}_generalNL'
         specific = f'{row.dim}_specificNL'
@@ -58,8 +57,7 @@ def to_canonical(preds):
         if len(pred_split) == 1:
             pred_spec = pred_split[0]
             pred_gen = ''
-            print(f'WARNING: could not split row {row.Index} into specific and general:')
-            print(row.output_pred)
+            print(f'WARNING: could not split row {row.Index} into specific and general')
         else:
             pred_spec, pred_gen = [x.strip() for x in pred_split]
         canon_row[general] = pred_gen
@@ -70,6 +68,7 @@ def to_canonical(preds):
                 canon_row[k] = 'escaped'
         canon_rows.append(canon_row)
     df = pd.DataFrame(canon_rows)
+
     return df
 
 def load_tokenizer(model_size, exp_num):
@@ -88,11 +87,11 @@ def load_tokenizer(model_size, exp_num):
 def get_all_results_df(path):
     if not os.path.exists(path):
         df = pd.DataFrame([], columns=RESULTS_COLS)
-        df.set_index(['model', 'split', 'is_baseline'], inplace=True)
+        df.set_index(['split', 'is_baseline', 'model'], inplace=True)
         return df
 
     df = pd.read_csv(path, sep='\t')
-    df.set_index(['model', 'split', 'is_baseline'], inplace=True)
+    df.set_index(['split', 'is_baseline', 'model'], inplace=True)
     return df
 
 def add_results_row(df, row):
@@ -106,7 +105,7 @@ def add_results_row(df, row):
         if action == 'y':
             pass
         elif action.startswith('_'):
-            idx = tuple([row[0] + action] + row[1:3])
+            idx = tuple(row[0:2] + [row[2] + action])
         else:
             return df
     df.loc[idx] = row_scores

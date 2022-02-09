@@ -1,5 +1,5 @@
 """
-Evaluation script for our experiments.
+Evaluation script, to be used with GLUCOSE entries with only 1 reference (i.e. validation).
 """
 
 import argparse
@@ -11,7 +11,7 @@ from sacrebleu import sentence_bleu, corpus_bleu
 from transformers.trainer_utils import set_seed
 
 from local_vars import SEED, GLUCOSE_DIR, ALL_RESULTS_PATH, EXP_NUMS
-from utils import add_results_row, get_all_results_df, save_results_df, select_most_likely
+from utils import add_results_row, get_all_results_df, save_results_df
 
 T5_HEADER = ['input', 'output']
 
@@ -48,6 +48,7 @@ def print_sample(df, size=5, orig_refs=[]):
 
 def run_eval(preds_path, exp):
     df = pd.read_csv(preds_path)
+    df = df.sort_values('unique_id')
     if exp in NO_GEN:
         df['exact_spec'] = df.apply(exact_match, axis=1)
         df['exact_gen'] = None
@@ -81,6 +82,8 @@ if __name__ == "__main__":
 
     exp = args.exp_num
     df, bleu_spec, bleu_gen = run_eval(args.input_csv, exp)
+    df['dim'] = df['input'].str.split(':', 1).str[0].str.slice(1,).astype(int)
+
     if df is None:
         print(f'{args.input_csv} could not be read')
         exit()
@@ -106,11 +109,9 @@ if __name__ == "__main__":
         print(f'EM general:   {df["exact_gen"].mean()*2000:.2f}')
         print(f'BLEU general: {bleu_gen:.2f}')
 
-
-    # get BLEU for individual dimensions
-    df['dim'] = df['input'].str.split(':', 1).str[0].str.slice(1,).astype(int)
     bleu_spec_d = {}
     bleu_gen_d = {}
+    # get BLEU for individual dimensions
     for dim in range(1, 11):
         df_dim = df[df['dim'] == dim]
         if exp in NO_GEN:
@@ -135,7 +136,7 @@ if __name__ == "__main__":
         bleu_gen_610 = eval_bleu(df_dim_610['pred_gen'], df_dim_610['true_gen'])
 
     split = os.path.basename(args.input_csv).split('_', 1)[1].split('.', 1)[0]
-    row = [exp_name, split, False, bleu_spec, bleu_gen] + [bleu_spec_d[dim] for dim in range(1, 11)] \
+    row = [split, False, exp_name, bleu_spec, bleu_gen] + [bleu_spec_d[dim] for dim in range(1, 11)] \
         + [bleu_gen_d[dim] for dim in range(1, 11)] \
         + [bleu_spec_15, bleu_spec_610, bleu_gen_15, bleu_gen_610]
 

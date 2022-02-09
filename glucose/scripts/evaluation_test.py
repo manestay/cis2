@@ -4,6 +4,7 @@
 import argparse
 import glob
 import os
+import re
 from collections import defaultdict
 
 import pandas as pd
@@ -30,14 +31,19 @@ parser.add_argument('--all_results', default=ALL_RESULTS_PATH, help='path to JSO
 # in the canonical CSV, so we can compare the same length.
 EMPTY_ID = "6f55e830-3f7b-4b96-b9f2-022e01dca25b__4"
 
+def clean_text(s):
+    return re.sub(r'\s\s+', ' ', s)
+
 def main(submissions_path, key_path, count_escaped=False, all_checkpoints=False):
     model_evaluation_results = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
     df_key = pd.read_csv(key_path, encoding="utf-8")
-
+    df_key = df_key.sort_values('unique_id')
 
     empty = df_key[df_key['unique_id'] == EMPTY_ID].iloc[0]
     assert empty.value_counts()['escaped'] == 20
-    empty_loc = empty.name
+    empty_idx = empty.name
+    df_key.drop(empty_idx, inplace=True)
+    # empty_loc = empty.name
     if all_checkpoints:
         itr = glob.glob(os.path.join(submissions_path, "**/predictions_test.csv"))
         name_ind = -2
@@ -55,7 +61,7 @@ def main(submissions_path, key_path, count_escaped=False, all_checkpoints=False)
         if '1_specificNL' not in df_generation.columns:
             # convert to canonical format if needed
             df_generation = to_canonical(df_generation)
-
+            df_generation = df_generation.sort_values('unique_id')
         # accumulate BLEU scores
         bleu_avg_gen = 0
         bleu_avg_spec = 0
@@ -70,14 +76,14 @@ def main(submissions_path, key_path, count_escaped=False, all_checkpoints=False)
 
             for mode in ["specific", "general"]:
                 predictions = df_generation[str(dim)+"_"+mode+"NL"].values
-                predictions = np.insert(predictions, empty_loc, "escaped")
+                # predictions = np.insert(predictions, empty_loc, "escaped")
                 references = [[], [], []]  # 3 references per each test case
                 dropped_idxs = set()
                 for idx, one_row in enumerate(df_key[str(dim)+"_"+mode+"NL"].values):
                     if one_row != "escaped":
                         splitted = one_row.split("****")
                         for i in range(3):
-                            references[i].append(splitted[i])
+                            references[i].append(clean_text(splitted[i]))
                     else:
                         if count_escaped:
                             for i in range(3):
@@ -133,17 +139,21 @@ if __name__ == "__main__":
 
     rows = defaultdict(lambda: dict.fromkeys(RESULTS_COLS))
     for dim, dim_d in model_evaluation_results.items():
-        print(dim)
+        if not dim.startswith('dim'):
+            print(dim)
         for mode, bleu_d in dim_d.items():
-            print('  ', mode)
+            if not dim.startswith('dim'):
+                print('  ', mode)
             for model, score in bleu_d.items():
-                print('    ', model, round(score['bleu'], 2))
+                if not dim.startswith('dim'):
+                    print('    ', model, round(score['bleu'], 2))
                 row = rows[model]
                 row['model'] = model
                 row['split'] = 'test'
                 row['is_baseline'] = True
                 row[f'{mode}_{dim}'] = score['bleu']
-        print('-' * 10)
+        if not dim.startswith('dim'):
+            print('-' * 10)
 
     df_results = get_all_results_df(args.all_results)
     for row in rows.values():
