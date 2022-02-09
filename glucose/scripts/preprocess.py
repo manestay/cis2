@@ -16,7 +16,7 @@ from tqdm import tqdm
 from nltk.tokenize import sent_tokenize
 
 from local_vars import EXP_NUMS, SAVE_DIR, TRAIN_PATH, TEST_PATH, BATCH_SIZE_ENCODE, COLS_TO_FORMAT, SEED
-from utils import split_output, select_most_likely, load_tokenizer, lemmatize_sents
+from utils import split_output, infer_cis2_label, load_tokenizer, lemmatize_sent, lemmatize_sents
 
 tqdm.pandas()
 
@@ -65,39 +65,42 @@ def encode(batch, tokenizer, max_source, max_target):
     return inp
 
 
-def get_in_out_df(df, exp_num):
+def get_in_out_df(df, exp_num, is_test=False):
     if exp_num == '1':
-        return get_in_out_df_exp1(df)
+        return get_in_out_df_exp1(df, is_test=is_test)
     elif exp_num == '2a':
-        return get_in_out_df_exp2a(df)
+        return get_in_out_df_exp2a(df, is_test=is_test)
     elif exp_num == '2b':
-        return get_in_out_df_exp2b(df)
+        return get_in_out_df_exp2b(df, is_test=is_test)
     elif exp_num == '3a':
-        return get_in_out_df_exp3a(df)
-    elif exp_num == 'A':
-        return get_in_out_df_expA(df)
+        return get_in_out_df_exp3a(df, is_test=is_test)
+    elif exp_num == 'cis2':
+        return get_in_out_df_cis2(df, is_test=is_test)
     else:
         print('invalid exp num!')
 
 
-def get_in_out_df_exp1(df):
+def get_in_out_df_exp1(df, is_test=False):
     # for next sentence task, we exclude cases where there are no sentences before
     # doesn't work well because we're not using the causal information
-    df = df[(df['story_before'] != '')].reset_index()
+    if not is_test:
+        df = df[(df['story_before'] != '')].reset_index()
     df['input'] = df['dim'] + ': ' + df['story_before'].str.strip()
     df['output'] = df['target']
     return df
 
 
-def get_in_out_df_exp2a(df):
-    df = df[(df['story_before'] != '')].reset_index()
+def get_in_out_df_exp2a(df, is_test=False):
+    if not is_test:
+        df = df[(df['story_before'] != '')].reset_index()
     df['input'] = df['dim'] + ': ' + df['story_before'].str.strip()
     df['output'] = df['output_orig']
     return df
 
 
-def get_in_out_df_exp2b(df):
-    df = df[(df['story_before'] != '')].reset_index()
+def get_in_out_df_exp2b(df, is_test=False):
+    if not is_test:
+        df = df[(df['story_before'] != '')].reset_index()
     df['input'] = df['dim'] + ': ' + df['story_before'].str.strip() + ' <mask_sent> ' + \
         df['story_after'].str.strip()
     if 'output_orig' in df.columns:
@@ -105,26 +108,40 @@ def get_in_out_df_exp2b(df):
     return df
 
 
-def get_in_out_df_exp3a(df):
+def get_in_out_df_exp3a(df, is_test=False):
     # after instead of before, since we have at least 1
-    df = df[(df['story_after'] != '')].reset_index()
+    if not is_test:
+        df = df[(df['story_after'] != '')].reset_index()
     target_highlighted = df['target'].apply(lambda x: f'*{x}*')
     df['input'] = df['dim'] + ': ' + df['story_before'] + target_highlighted
     df['output'] = df['output_orig']
     return df
 
 
-def get_in_out_df_expA(df):
+def get_spec_col(output_spec):
+    spec0 = output_spec.apply(lambda x: x[0])
+    spec0_lem = spec0.progress_apply(lemmatize_sent)
+    spec1 = output_spec.apply(lambda x: x[1])
+    spec2 = output_spec.apply(lambda x: x[2])
+    spec2_lem = spec2.progress_apply(lemmatize_sent)
+    return list(zip(spec0_lem, spec1, spec2_lem))
+
+
+def get_in_out_df_cis2(df, is_test=False):
     # A stands for "abstract", as in abstracted away from language generation
     # in this setting, we generate outputs of the form <sX> >Relation> <sY>
     # we consider the specific relationship to create these 3-token sequences
-    num_sents = df['sents'].apply(len)
-    df = df[num_sents == 5].copy() # skip examples with bad punctuation
+    if not is_test:
+        num_sents = df['sents'].apply(len)
+        df = df[num_sents == 5].copy() # skip examples with bad punctuation
     split_output(df, 'output_orig')
-    print('heuristically calculating expA labels')
+    print('heuristically calculating CIS^2 labels')
+    print('lemmatizing...')
     df['lemmatized'] = df['sents'].progress_apply(lemmatize_sents)
-    df['spec_lemmatized'] = df['output_spec'].progress_apply(lemmatize_sents)
-    df['output'], df['sim_score'] = zip(*df.progress_apply(select_most_likely, axis=1))
+    df['spec_lemmatized'] = get_spec_col(df['output_spec'])
+
+    print('selecting most likely...')
+    df['output'], df['sim_score'] = zip(*df.progress_apply(infer_cis2_label, axis=1))
     # after instead of before, since we have at least 1
     target_highlighted = df['target'].apply(lambda x: f'*{x}*')
     df['input'] = df['dim'] + ': ' + df['story_before'] + target_highlighted + df['story_after']
@@ -163,11 +180,14 @@ def manual_fix(df_train, is_test):
     if is_test:
         return
 
-    bad_index = df_train['output'][df_train['output'].str.match(".*foodd.*\)")].index[0]
-    old = df_train.loc[bad_index]['output']
+    try:
+        bad_index = df_train['output'][df_train['output'].str.match(".*foodd.*\)")].index[0]
+        old = df_train.loc[bad_index]['output']
+        fixed = re.sub(r'foodd.*\)', 'food)', old)
+        df_train.loc[bad_index, 'output'] = fixed
+    except IndexError:
+        pass
     # remove random letters at end of example 4744
-    fixed = re.sub(r'foodd.*\)', 'food)', old)
-    df_train.loc[bad_index, 'output'] = fixed
 
 
     # some inputs are all capitalized -- change them to lower so BPE works
@@ -257,7 +277,7 @@ def format_data(train_path, exp_num, split_val=False, val_ids=None, seed=0, is_t
     exp_num = str(exp_num)
     df_train_orig = pd.read_csv(train_path)
     logging.debug(f"loaded original train CSV {train_path} ({len(df_train_orig)} rows)")
-    split_sents = True if exp_num == 'A' else False
+    split_sents = True if exp_num == 'cis2' else False
 
     df_train_ex = format_for_t5(df_train_orig, is_test=is_test, split_sents=split_sents)
     manual_fix(df_train_ex, is_test)
@@ -293,10 +313,10 @@ def format_data(train_path, exp_num, split_val=False, val_ids=None, seed=0, is_t
     if exp_num == '0':
         return df_train, df_val, ids_val
 
-    df_train1 = get_in_out_df(df_train, exp_num)
+    df_train1 = get_in_out_df(df_train, exp_num, is_test=is_test)
     df_val1 = None
     if split_val or val_ids:
-        df_val1 = get_in_out_df(df_val, exp_num)
+        df_val1 = get_in_out_df(df_val, exp_num, is_test=is_test)
     return df_train1, df_val1, ids_val
 
 
@@ -307,7 +327,21 @@ def preprocess(args):
         args.train_path, args.exp_num, val_ids=args.val_ids, seed=args.seed)
     df_test, _, _ = format_data(args.test_path, args.exp_num,
                                 split_val=False, seed=args.seed, is_test=True)
-    df_train, df_val, df_test = df_train.drop('sents', axis=1), df_val.drop('sents', axis=1), df_test.drop('sents', axis=1)
+
+    # if args.exp_num == 'cis2':
+    #     mean = df_train['sim_score'].mean()
+    #     train_len = len(df_train)
+    #     df_train = df_train[df_train['sim_score'] > mean]
+    #     print(f'filtered train to {len(df_train)} examples (from {train_len})')
+
+    #     val_len = len(df_val)
+    #     df_val = df_val[df_val['sim_score'] > mean]
+    #     print(f'filtered val to {len(df_val)} examples (from {val_len})')
+
+    to_drop =  ['sents', 'lemmatized', 'spec_lemmatized', 'story_before', 'story_after']
+    df_train = df_train.drop(to_drop, axis=1, errors='ignore')
+    df_val = df_val.drop(to_drop, axis=1, errors='ignore')
+    df_test = df_test.drop(to_drop, axis=1, errors='ignore')
 
     logging.debug(f"size of train: {len(df_train)}")
     logging.debug(f"size of validation: {len(df_val)}")
@@ -327,6 +361,7 @@ def preprocess(args):
 
     logging.debug('calculating max sequence length...')
     max_source, max_target = get_src_tgt_len(df_train['input'], df_train['output'], tokenizer)
+
     logging.debug(
         f'number of tokens:\nmax input tokens: {max_source}\nmax output tokens: {max_target}')
 
@@ -338,7 +373,7 @@ def preprocess(args):
 
     ds_train.set_format(type='torch', columns=COLS_TO_FORMAT)
     ds_val.set_format(type='torch', columns=COLS_TO_FORMAT)
-    ds_test.set_format(type='torch', columns=[x for x in COLS_TO_FORMAT if x != 'labels'])
+    ds_test.set_format(type='torch', columns=COLS_TO_FORMAT)
 
     # verify proper encoding
     logging.debug('example text after encoding and decoding:')

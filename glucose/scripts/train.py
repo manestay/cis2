@@ -24,6 +24,7 @@ parser.add_argument('--seed', type=int, default=SEED)
 parser.add_argument('--model_size', '-m', default='t5-base')
 parser.add_argument('--no_shuffle', dest='shuffle', action='store_false')
 parser.add_argument('--eval_bleu', action='store_true')
+parser.add_argument('--eval_em', action='store_true')
 parser.add_argument('--batch_size_train', '-bst', type=int, default=0)
 parser.add_argument('--batch_size_eval', '-bse', type=int, default=0)
 
@@ -45,13 +46,26 @@ def compute_sacrebleu(eval_pred):
     logging.info(output_dict)
     return output_dict
 
+def compute_exact_match(eval_pred):
+    logits, labels = eval_pred
+    pred_ids = np.argmax(logits[0], axis=-1)
+    preds = [tokenizer.decode(x, skip_special_tokens=True) for x in pred_ids]
+    refs = [tokenizer.decode(x, skip_special_tokens=True) for x in labels]
+    score = sum([a == b for a, b in zip(preds, refs)]) / len(preds)
+    output_dict = {'em': score}
+    logging.info(output_dict)
+    return output_dict
 
 def main(args, exp_name, tokenizer, ds_train, ds_val, batch_size_train, batch_size_eval, use_fp16,
-         eval_bleu=False):
+         eval_bleu=False, eval_em=False):
     transformers.trainer_utils.set_seed(args.seed)
     if eval_bleu:
         eval_metric = 'eval_bleu'
         compute_metrics = compute_sacrebleu
+        greater_is_better = True
+    elif eval_em:
+        eval_metric = 'eval_em'
+        compute_metrics = compute_exact_match
         greater_is_better = True
     else:
         eval_metric = "eval_loss"
@@ -71,7 +85,7 @@ def main(args, exp_name, tokenizer, ds_train, ds_val, batch_size_train, batch_si
     # taken from GLUCOSE paper and T5 paper when possible
     training_args = TrainingArguments(
         output_dir=args.output_dir,
-        num_train_epochs=3,
+        num_train_epochs=10,
         per_device_train_batch_size=batch_size_train,
         per_device_eval_batch_size=batch_size_eval,
         # prediction_loss_only=True,
@@ -136,13 +150,15 @@ if __name__ == "__main__":
 
     logging.debug(f'loading datasets from from {args.dataset_dir}...')
     ds_train = datasets.load_from_disk(f'{args.dataset_dir}/ds_train')
-    if args.eval_bleu: # evaluating BLEU takes a long time, use small set
-        ds_val = datasets.load_from_disk(f'{args.dataset_dir}/ds_val_small')
-    else:
-        ds_val = datasets.load_from_disk(f'{args.dataset_dir}/ds_val')
+    # if args.eval_bleu: # evaluating BLEU takes a long time, use small set
+    #     ds_val = datasets.load_from_disk(f'{args.dataset_dir}/ds_val_small')
+    # else:
+    ds_val = datasets.load_from_disk(f'{args.dataset_dir}/ds_val')
     logging.debug(f'example from train:')
     logging.debug(f'{tokenizer.decode(ds_train[200]["input_ids"])}')
     logging.debug(f'{tokenizer.decode(ds_train[200]["labels"])}')
+    if 'output_orig' in ds_train.features:
+        logging.debug(ds_train['output_orig'][200])
     if args.model_size == 't5-large':
         batch_size_train = args.batch_size_train or 8
         batch_size_eval = args.batch_size_eval or 12
@@ -159,4 +175,4 @@ if __name__ == "__main__":
     # wandb.login()
     wandb.init(project="glucose_hf", name=exp_name, id=wandb.util.generate_id())
     main(args, exp_name, tokenizer, ds_train, ds_val, batch_size_train, batch_size_eval,
-         use_fp16=use_fp16, eval_bleu=args.eval_bleu)
+         use_fp16=use_fp16, eval_bleu=args.eval_bleu, eval_em=args.eval_em)

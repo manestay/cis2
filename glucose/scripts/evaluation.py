@@ -21,7 +21,7 @@ parser.add_argument('--input_csv', '-i')
 parser.add_argument('--model_size', '-ms')
 parser.add_argument('--all_results', default=ALL_RESULTS_PATH, help='path to TSV with all results')
 
-NO_GEN = set(['1', 'A'])
+NO_GEN = set(['1', 'A', 'cis2'])
 
 def eval_bleu(hyps, refs):
     return corpus_bleu(hyps.fillna(''), [refs]).score
@@ -85,7 +85,7 @@ if __name__ == "__main__":
         print(f'{args.input_csv} could not be read')
         exit()
 
-    if exp == 'A':
+    if exp == 'cis2':
         # TODO: make a param instead of hardcoded
         if 'val' in args.input_csv:
             ref_path = 'outputs/baseline/model/predictions_val.csv'
@@ -98,12 +98,12 @@ if __name__ == "__main__":
     print_sample(df, 3, orig_refs)
 
     print('-' * 10, f'{args.input_csv}', '-' * 10)
-    print(f'EM specific:   {df["exact_spec"].mean()*100:.2f}')
+    print(f'EM specific:   {df["exact_spec"].mean()*2000:.2f}')
     print(f'BLEU specific: {bleu_spec:.2f}')
 
     if exp not in NO_GEN:
         print(f'{args.input_csv}', '-' * 50)
-        print(f'EM general:   {df["exact_gen"].mean()*100:.2f}')
+        print(f'EM general:   {df["exact_gen"].mean()*2000:.2f}')
         print(f'BLEU general: {bleu_gen:.2f}')
 
 

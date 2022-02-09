@@ -1,16 +1,15 @@
 import os
-import re
-from functools import lru_cache
 
+import nltk
 import pandas as pd
-from sacrebleu import sentence_bleu
+from nltk.corpus import wordnet
+from tokenizers import Tokenizer
+from tokenizers.models import WordLevel
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
 from local_vars import CANONICAL_COLS, RESULTS_COLS
-
-import nltk
-from nltk.corpus import wordnet
+from cis2_lib import *
 
 tqdm.pandas()
 
@@ -78,9 +77,11 @@ def load_tokenizer(model_size, exp_num):
     if exp_num == '2b':
         special_tokens_dict = {'additional_special_tokens': ['<mask_sent>']}
         tokenizer.add_special_tokens(special_tokens_dict)
-    elif exp_num == 'A':
-        extra_tokens = ['<s0>', '<s1>', '<s2>', '<s3>', '<s4>']
-        tokenizer.add_tokens(extra_tokens)
+    elif exp_num == 'cis2':
+        sent_tokens = ['<s0>', '<s1>', '<s2>', '<s3>', '<s4>']
+        rel_tokens = ['>Causes/Enables>', '>Enables>', '>Results in>', '>Motivates>', '>Causes>']
+        tokenizer.add_tokens(sent_tokens)
+        tokenizer.add_tokens(rel_tokens)
     return tokenizer
 
 ## functions for working with the results df
@@ -116,87 +117,3 @@ def save_results_df(df, path, round=2):
         df = df.round(round)
     df.sort_index(inplace=True)
     df.to_csv(path, sep='\t')
-
-##
-def find_sim(sent, other, mode='bleu'):
-    if mode == 'bleu':
-        return sentence_bleu(sent, [other]).score
-
-def select_most_likely(row):
-    # for the given row, generates the 3-token CIS^2 and the similarity score
-    # it is most likely because we use BLEU as the heuristic to find the other sentence
-
-    # sents = row['sents']
-    # spec = row["output_spec"]
-    sents = row['lemmatized']
-    spec = row['spec_lemmatized']
-
-    sel_idx = row['selected_index'] # this is given from annotations
-    dim = int(row['dim'].strip('#'))
-    if 1 <= dim <= 5:
-        other_pos, sel_pos = 0, 2
-    else: # 6 to 10
-        other_pos, sel_pos = 2, 0
-    relation = f'>{spec[1]}>'
-    other = spec[other_pos]
-    # use heuristic to find most likely match
-    best_inp = ''
-    best_idx = -1
-    best_score = -1
-    for i, sent in enumerate(sents):
-        if i == sel_idx: # can't select same sentence twice
-            continue
-        score = find_sim(sent, other, 'bleu')
-        if score > best_score:
-            best_inp = sent
-            best_idx = i
-            best_score = score
-    # create the 3-token sequence
-    rel = [None, relation, None]
-    rel[other_pos] = f'<s{best_idx}>'
-    rel[sel_pos] = f'<s{sel_idx}>'
-    return ' '.join(rel), round(best_score, 2)
-
-def split_output(df, output_label='output'):
-    print('splitting outputs')
-    output_rules = df[output_label].str.split(' \*\* ').str[0]
-    output_spec = output_rules.str.split('>')
-    lens = output_spec.apply(len)
-    assert lens.nunique() == 1 # with this split, shoudl always have len == 3
-    df.loc[:, 'output_spec'] = output_spec
-
-####
-from nltk.stem import WordNetLemmatizer
-wnl = WordNetLemmatizer()
-lemmatize = lru_cache(maxsize=50000)(wnl.lemmatize)
-pos_tag = lru_cache(maxsize=50000)(nltk.pos_tag)
-
-def wordnet_pos(nltk_tag):
-    if nltk_tag.startswith('J'):
-        return wordnet.ADJ
-    elif nltk_tag.startswith('V'):
-        return wordnet.VERB
-    elif nltk_tag.startswith('N'):
-        return wordnet.NOUN
-    elif nltk_tag.startswith('R'):
-        return wordnet.ADV
-    else:
-        return None
-
-@lru_cache(maxsize=50000)
-def lemmatize_sent(sent):
-    pos_tagged = pos_tag(tuple(nltk.word_tokenize(sent)))
-    wordnet_tagged = list(map(lambda x: (x[0], wordnet_pos(x[1])), pos_tagged))
-    sent_lem = [lemmatize(word, tag) if tag else lemmatize(word) for word, tag in wordnet_tagged]
-    if len(sent_lem) and sent_lem[-1] == '.':
-        del sent_lem[-1]
-    sent_lem = ' '.join(sent_lem)
-
-    return sent_lem
-
-def lemmatize_sents(sents):
-    sents_lem = []
-    for sent in sents:
-        sent_lem = lemmatize_sent(sent)
-        sents_lem.append(sent_lem)
-    return sents_lem

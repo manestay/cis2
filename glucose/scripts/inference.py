@@ -33,13 +33,7 @@ parser.add_argument('--canonical', '-c', action='store_true',
 parser.add_argument('--seed', type=int, default=2557)
 parser.add_argument('--all_checkpoints', action='store_true', help='evaluate all checkpoints')
 
-kwargs = dict(
-    top_k=15,
-    do_sample=True,
-    max_length=256)
-
-
-def generate_from_sentence(model, tokenizer, input):
+def generate_from_sentence(model, tokenizer, input, kwargs={}):
     inputs = tokenizer.encode(input, return_tensors='pt')
     output_sequences = model.generate(
         inputs.to(model.device),
@@ -50,7 +44,7 @@ def generate_from_sentence(model, tokenizer, input):
     return [tokenizer.decode(x, skip_special_tokens=True) for x in output_sequences]
 
 
-def generate_from_dataset(model, tokenizer, dataset, batch_size=128, skip=True):
+def generate_from_dataset(model, tokenizer, dataset, batch_size=128, skip=True, kwargs={}):
     output_sequences_all = []
     for i in tqdm(range(0, len(dataset), batch_size)):
         # for i in tqdm(range(0, 1000, batch_size)):
@@ -70,8 +64,16 @@ def decode_seqs(seqs, tokenizer, skip):
 
 
 def run_inference(dataset, model, tokenizer, exp_num, batch_size=128, seed=0):
+    if exp_num not in set(['A', 'cis2']):
+        kwargs = dict(
+            top_k=15,
+            do_sample=True,
+            max_length=256)
+    else:
+        kwargs = dict(num_beams=5)
+
     set_seed(seed)
-    preds = generate_from_dataset(model, tokenizer, dataset, batch_size=batch_size)
+    preds = generate_from_dataset(model, tokenizer, dataset, batch_size=batch_size, kwargs=kwargs)
     preds_decoded = decode_seqs(preds, tokenizer, True)
 
     # dataset_orig = dataset

@@ -3,9 +3,14 @@ gpt2_data/gpt2_dev
 gpt2_data/gpt2_training
 t5_data/t5_training_data.tsv
 
+data/
 outputs/
 runs/
 wandb/
 
 .DS_Store
 *.pyc
+
+!data/val_ids.txt
+!data/README.md
+!outputs/all_results
