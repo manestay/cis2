@@ -11,7 +11,16 @@ TODO: reorganize the directories -- probably move the notebooks to glucose/noteb
 TODO: rewrite the README to make sure others can run it
 
 # Citation
-TODO
-
+```
+    @inproceedings{Li2022,
+    title={{$CIS^2$: A Simplified Commonsense Inference Evaluation for Story Prose}},
+    author={Li, Bryan and Martin, Lara J. and Callison-Burch, Chris},
+    archivePrefix = {arXiv},
+    eprint = {2202.07880},
+    journal={{Workshop on Commonsense Representation and Reasoning (CSRR) at ACL 2022}},
+    year={2022},
+    url={https://openreview.net/forum?id=Se-xHMYg_bc}
+    }
+```
 # Acknowledgments
 We thank Or Biran and Lori Moon of Elemental Cognition for their assistance with working with the GLUCOSE dataset and codebase.
