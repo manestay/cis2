@@ -1,7 +1,6 @@
 """
 Preprocesses the datasets, and also tokenizes them.
 
-NOTE: may want to merge preprocess.py and format_data.py
 """
 
 import argparse
@@ -35,7 +34,6 @@ parser.add_argument('--val_ids', default=f'{SAVE_DIR}/val_ids.txt', help='specif
 
 parser.add_argument('--no_logging', dest='logging', action='store_false')
 
-# uses the parser from format_data.py, with additional arguments
 parser.add_argument('--dataset_dir')
 parser.add_argument('--model_size', '-ms', default='t5-base')
 parser.add_argument('--sim_metric', '-sm', default='bleu', choices=METRICS)

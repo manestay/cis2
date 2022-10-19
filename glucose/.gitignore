@@ -12,5 +12,5 @@ wandb/
 *.pyc
 
 !data/val_ids.txt
-!data/README.md
-!outputs/all_results
+!data/val_ids_small.txt
+!outputs/all_results.tsv

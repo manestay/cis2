@@ -1,0 +1,5 @@
+characters/character_v1.0.0
+.ipynb_checkpoints/
+runs/
+t5_models/
+wandb/
