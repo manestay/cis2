@@ -21,6 +21,9 @@ The main run script is `glucose/scripts/run_pipeline.sh`. Assuming your paths ar
 * `evaluation_test.py`: evaluate BLEU scores when there are 3 references, i.e. for the GLUCOSE test set.
 * `evaluation_cis2.py`: evaluate CIS^2 scores.
 
+# Pretrained model
+You can download the best model checkpoint for the CIS^2 model [here](https://drive.google.com/file/d/1rxw2r-DzTW_NcAlUGP874plZWQ4yYDwT/view?usp=sharing).
+
 # Citation
 ```
     @inproceedings{Li2022cis2,
