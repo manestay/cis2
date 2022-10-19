@@ -9,14 +9,17 @@ import logging
 import os
 import re
 
+import dill as pickle
 import datasets
 import pandas as pd
 from sklearn import model_selection
 from tqdm import tqdm
 from nltk.tokenize import sent_tokenize
 
-from local_vars import EXP_NUMS, SAVE_DIR, TRAIN_PATH, TEST_PATH, BATCH_SIZE_ENCODE, COLS_TO_FORMAT, SEED
-from utils import split_output, infer_cis2_label, load_tokenizer, lemmatize_sent, lemmatize_sents
+from local_vars import EXP_NUMS, SAVE_DIR, TRAIN_PATH, TEST_PATH, BATCH_SIZE_ENCODE, COLS_TO_FORMAT, \
+                       SEED, METRICS
+from utils import split_output, infer_cis2_label, load_tokenizer, \
+                  lemmatize_sent, lemmatize_sents, get_sent_vecs, get_exp_name
 
 tqdm.pandas()
 
@@ -27,7 +30,7 @@ parser.add_argument('--test_path', default=TEST_PATH)
 parser.add_argument('--seed', type=int, default=SEED)
 parser.add_argument('--split_val', action='store_true',
                     help='split a validation set from train (deprecated)')
-parser.add_argument('--val_ids', default=None, help='specify story IDs to use as the validation set. '
+parser.add_argument('--val_ids', default=f'{SAVE_DIR}/val_ids.txt', help='specify story IDs to use as the validation set. '
                     'Supersedes --split_val if both are used.')
 
 parser.add_argument('--no_logging', dest='logging', action='store_false')
@@ -35,9 +38,8 @@ parser.add_argument('--no_logging', dest='logging', action='store_false')
 # uses the parser from format_data.py, with additional arguments
 parser.add_argument('--dataset_dir')
 parser.add_argument('--model_size', '-ms', default='t5-base')
-parser.add_argument('--out_location', default=SAVE_DIR)
-
-parser.set_defaults(val_ids=f'{SAVE_DIR}/val_ids.txt')
+parser.add_argument('--sim_metric', '-sm', default='bleu', choices=METRICS)
+parser.add_argument('--specific-only', '-so', action='store_true')
 
 
 def get_src_tgt_len(source_text, target_text, tokenizer):
@@ -65,7 +67,7 @@ def encode(batch, tokenizer, max_source, max_target):
     return inp
 
 
-def get_in_out_df(df, exp_num, is_test=False):
+def get_in_out_df(df, exp_num, is_test=False, sim_metric='bleu'):
     if exp_num == '1':
         return get_in_out_df_exp1(df, is_test=is_test)
     elif exp_num == '2a':
@@ -75,7 +77,7 @@ def get_in_out_df(df, exp_num, is_test=False):
     elif exp_num == '3a':
         return get_in_out_df_exp3a(df, is_test=is_test)
     elif exp_num == 'cis2':
-        return get_in_out_df_cis2(df, is_test=is_test)
+        return get_in_out_df_cis2(df, is_test=is_test, sim_metric=sim_metric)
     else:
         print('invalid exp num!')
 
@@ -127,7 +129,7 @@ def get_spec_col(output_spec):
     return list(zip(spec0_lem, spec1, spec2_lem))
 
 
-def get_in_out_df_cis2(df, is_test=False):
+def get_in_out_df_cis2(df, is_test=False, sim_metric='bleu'):
     # A stands for "abstract", as in abstracted away from language generation
     # in this setting, we generate outputs of the form <sX> >Relation> <sY>
     # we consider the specific relationship to create these 3-token sequences
@@ -136,12 +138,16 @@ def get_in_out_df_cis2(df, is_test=False):
         df = df[num_sents == 5].copy() # skip examples with bad punctuation
     split_output(df, 'output_orig')
     print('heuristically calculating CIS^2 labels')
-    print('lemmatizing...')
-    df['lemmatized'] = df['sents'].progress_apply(lemmatize_sents)
-    df['spec_lemmatized'] = get_spec_col(df['output_spec'])
+    if sim_metric == 'bleu':
+        print('lemmatizing...')
+        df['lemmatized'] = df['sents'].progress_apply(lemmatize_sents)
+        df['spec_lemmatized'] = get_spec_col(df['output_spec'])
+    elif sim_metric == 'sent_vecs':
+            print('calculating sentence vectors')
+            df['sent_vecs'] = df['sents'].progress_apply(get_sent_vecs)
 
     print('selecting most likely...')
-    df['output'], df['sim_score'] = zip(*df.progress_apply(infer_cis2_label, axis=1))
+    df['output'], df['sim_score'] = zip(*df.progress_apply(infer_cis2_label, axis=1, args=(sim_metric,)))
     # after instead of before, since we have at least 1
     target_highlighted = df['target'].apply(lambda x: f'*{x}*')
     df['input'] = df['dim'] + ': ' + df['story_before'] + target_highlighted + df['story_after']
@@ -232,6 +238,8 @@ def format_for_t5(df, is_test=False, split_sents=False):
                 # assert len(sents) == 5 # there are some misformatted inputs so can't assert
                 story = row.story
 
+            sents = tuple(sents)
+
             selected_sentence = row.selected_sentence
             escaped = re.escape(selected_sentence)
             story = re.sub(escaped, f"*{selected_sentence}*", story, 1)
@@ -271,7 +279,8 @@ def format_for_t5(df, is_test=False, split_sents=False):
     return df_expanded
 
 
-def format_data(train_path, exp_num, split_val=False, val_ids=None, seed=0, is_test=False):
+def format_data(train_path, exp_num, split_val=False, val_ids=None, seed=0, is_test=False,
+                sim_metric='bleu'):
     if val_ids and split_val:
         print('WARNING: both split val and val_ids were specified; only using val_ids')
     exp_num = str(exp_num)
@@ -310,13 +319,10 @@ def format_data(train_path, exp_num, split_val=False, val_ids=None, seed=0, is_t
         df_val = split_contexts(df_val_ex)
     logging.debug(f"split stories into before/target sentence/after")
 
-    if exp_num == '0':
-        return df_train, df_val, ids_val
-
-    df_train1 = get_in_out_df(df_train, exp_num, is_test=is_test)
+    df_train1 = get_in_out_df(df_train, exp_num, is_test, sim_metric)
     df_val1 = None
     if split_val or val_ids:
-        df_val1 = get_in_out_df(df_val, exp_num, is_test=is_test)
+        df_val1 = get_in_out_df(df_val, exp_num, is_test, sim_metric)
     return df_train1, df_val1, ids_val
 
 
@@ -324,24 +330,32 @@ def preprocess(args):
     # format data for the given experiment
     logging.debug(f'formatting data for experiment {args.exp_num}')
     df_train, df_val, ids_val = format_data(
-        args.train_path, args.exp_num, val_ids=args.val_ids, seed=args.seed)
-    df_test, _, _ = format_data(args.test_path, args.exp_num,
-                                split_val=False, seed=args.seed, is_test=True)
+        args.train_path, args.exp_num, val_ids=args.val_ids, seed=args.seed,
+        sim_metric=args.sim_metric)
+    df_test, _, _ = format_data(
+        args.test_path, args.exp_num, split_val=False, seed=args.seed,
+        is_test=True, sim_metric=args.sim_metric)
+    if args.specific_only:
+        df_train['output'] = df_train['output'].str.split(' \*\* ').str[0]
+        if df_val is not None:
+            df_val['output'] = df_val['output'].str.split(' \*\* ').str[0]
+        if df_test is not None:
+            df_test['output'] = df_test['output'].str.split(' \*\* ').str[0]
+    if args.exp_num == 'cis2':
+        mean = df_train['sim_score'].mean()
+        train_len = len(df_train)
+        df_train = df_train[df_train['sim_score'] > mean]
+        print(f'filtered train to {len(df_train)} examples (from {train_len})')
 
-    # if args.exp_num == 'cis2':
-    #     mean = df_train['sim_score'].mean()
-    #     train_len = len(df_train)
-    #     df_train = df_train[df_train['sim_score'] > mean]
-    #     print(f'filtered train to {len(df_train)} examples (from {train_len})')
+        val_len = len(df_val)
+        df_val = df_val[df_val['sim_score'] > mean]
+        print(f'filtered val to {len(df_val)} examples (from {val_len})')
 
-    #     val_len = len(df_val)
-    #     df_val = df_val[df_val['sim_score'] > mean]
-    #     print(f'filtered val to {len(df_val)} examples (from {val_len})')
-
-    to_drop =  ['sents', 'lemmatized', 'spec_lemmatized', 'story_before', 'story_after']
+    to_drop =  ['sents', 'lemmatized', 'spec_lemmatized', 'story_before', 'story_after', 'sent_vecs']
     df_train = df_train.drop(to_drop, axis=1, errors='ignore')
     df_val = df_val.drop(to_drop, axis=1, errors='ignore')
     df_test = df_test.drop(to_drop, axis=1, errors='ignore')
+
 
     logging.debug(f"size of train: {len(df_train)}")
     logging.debug(f"size of validation: {len(df_val)}")
@@ -379,11 +393,13 @@ def preprocess(args):
     logging.debug('example text after encoding and decoding:')
     logging.debug(tokenizer.decode(ds_train[200]['input_ids']))
     logging.debug(tokenizer.decode(ds_train[200]['labels']))
+    if 'output_orig' in ds_train.features:
+        logging.debug(ds_train['output_orig'][200])
 
     logging.debug(f'saving tokenized datasets to disk at {args.dataset_dir}')
     ds_train.save_to_disk(f'{args.dataset_dir}/ds_train')
-    ds_val.save_to_disk(f'{args.dataset_dir}/ds_val')
-    # ds_val.save_to_disk(f'{args.dataset_dir}/ds_val_small')
+    # ds_val.save_to_disk(f'{args.dataset_dir}/ds_val')
+    ds_val.save_to_disk(f'{args.dataset_dir}/ds_val_small')
     ds_test.save_to_disk(f'{args.dataset_dir}/ds_test')
 
 
@@ -392,6 +408,7 @@ if __name__ == "__main__":
     if args.logging:
         logging.basicConfig(level=logging.DEBUG)
     if not args.dataset_dir:
-        args.dataset_dir = f'{SAVE_DIR}/exp{args.exp_num}_{args.model_size}'
+        exp_name = get_exp_name(args.exp_num, args.model_size, args.sim_metric, args.specific_only)
+        args.dataset_dir = os.path.join(SAVE_DIR, exp_name)
     os.makedirs(args.dataset_dir, exist_ok=True)
     preprocess(args)

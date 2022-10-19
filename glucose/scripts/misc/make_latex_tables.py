@@ -39,7 +39,7 @@ print('general baseline')
 print_latex(df_baseline_gen)
 
 # generate tables for our experiments
-df_exp = df[(~df['is_baseline']) & (df['split'] == 'test')]
+df_exp = df[(df['is_baseline']) & (df['split'] == 'test')]
 df_exp = df_exp.drop(['split', 'is_baseline'], axis=1)
 
 df_exp_avg = df_exp[columns_avg]

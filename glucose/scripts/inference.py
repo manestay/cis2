@@ -17,8 +17,8 @@ from tqdm import tqdm
 from transformers import T5ForConditionalGeneration, AutoTokenizer
 from transformers.trainer_utils import set_seed
 
-from local_vars import GLUCOSE_DIR, SAVE_DIR
-from utils import to_canonical, load_tokenizer
+from local_vars import GLUCOSE_DIR, SAVE_DIR, METRICS
+from utils import to_canonical, load_tokenizer, get_exp_name
 
 parser = argparse.ArgumentParser()
 parser.add_argument('exp_num', type=str)
@@ -32,6 +32,8 @@ parser.add_argument('--canonical', '-c', action='store_true',
                     help='also output a CSV in canonical GLUCOSE format for evaluation_baseline.py')
 parser.add_argument('--seed', type=int, default=2557)
 parser.add_argument('--all_checkpoints', action='store_true', help='evaluate all checkpoints')
+parser.add_argument('--specific-only', '-so', action='store_true')
+parser.add_argument('--sim_metric', '-sm', default='bleu', choices=METRICS)
 
 def generate_from_sentence(model, tokenizer, input, kwargs={}):
     inputs = tokenizer.encode(input, return_tensors='pt')
@@ -70,7 +72,7 @@ def run_inference(dataset, model, tokenizer, exp_num, batch_size=128, seed=0):
             do_sample=True,
             max_length=256)
     else:
-        kwargs = dict(num_beams=5)
+        kwargs = {}
 
     set_seed(seed)
     preds = generate_from_dataset(model, tokenizer, dataset, batch_size=batch_size, kwargs=kwargs)
@@ -100,7 +102,8 @@ def run_inference(dataset, model, tokenizer, exp_num, batch_size=128, seed=0):
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    exp_name = f'exp{args.exp_num}_{args.model_size}'
+    if not args.model_dir or not args.dataset_dir:
+        exp_name = get_exp_name(args.exp_num, args.model_size, args.sim_metric, args.specific_only)
     if not args.model_dir:
         args.model_dir = os.path.join(GLUCOSE_DIR, 'outputs', exp_name)
     if not args.dataset_dir:

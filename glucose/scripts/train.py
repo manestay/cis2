@@ -13,8 +13,8 @@ import transformers
 from transformers import T5ForConditionalGeneration, Trainer, TrainingArguments, DataCollatorWithPadding
 import wandb
 
-from local_vars import GLUCOSE_DIR, SAVE_DIR, EXP_NUMS, SEED
-from utils import load_tokenizer
+from local_vars import GLUCOSE_DIR, SAVE_DIR, EXP_NUMS, SEED, METRICS
+from utils import load_tokenizer, get_exp_name
 
 parser = argparse.ArgumentParser()
 parser.add_argument('exp_num', choices=EXP_NUMS)
@@ -22,11 +22,13 @@ parser.add_argument('--output_dir')
 parser.add_argument('--dataset_dir')
 parser.add_argument('--seed', type=int, default=SEED)
 parser.add_argument('--model_size', '-m', default='t5-base')
+parser.add_argument('--sim_metric', '-sm', default='bleu', choices=METRICS)
 parser.add_argument('--no_shuffle', dest='shuffle', action='store_false')
 parser.add_argument('--eval_bleu', action='store_true')
 parser.add_argument('--eval_em', action='store_true')
 parser.add_argument('--batch_size_train', '-bst', type=int, default=0)
 parser.add_argument('--batch_size_eval', '-bse', type=int, default=0)
+parser.add_argument('--specific-only', '-so', action='store_true')
 
 parser.add_argument('--no_logging', dest='logging', action='store_false')
 
@@ -92,7 +94,7 @@ def main(args, exp_name, tokenizer, ds_train, ds_val, batch_size_train, batch_si
         evaluation_strategy='steps',
         save_steps=2000,
         logging_steps=2000,
-        save_total_limit=5,
+        save_total_limit=4,
         remove_unused_columns=True,
         run_name=exp_name,
         load_best_model_at_end=True,
@@ -105,6 +107,7 @@ def main(args, exp_name, tokenizer, ds_train, ds_val, batch_size_train, batch_si
 
     # note that we change the lr to 1e-4, since the original 1e-3 converges too fast
 
+    # optimizer = transformers.Adafactor(model.parameters(), lr=0.001,
     optimizer = transformers.Adafactor(model.parameters(), lr=0.0001,
                                        relative_step=False, warmup_init=False, scale_parameter=False,
                                        decay_rate=0.0, clip_threshold=1.0)
@@ -142,7 +145,7 @@ if __name__ == "__main__":
     # load tokenizer and datasets from disk
     tokenizer = load_tokenizer(args.model_size, args.exp_num)
 
-    exp_name = f'exp{args.exp_num}_{args.model_size}'
+    exp_name = get_exp_name(args.exp_num, args.model_size, args.sim_metric, args.specific_only)
     if not args.output_dir:
         args.output_dir = f'{GLUCOSE_DIR}/outputs/{exp_name}'
     if not args.dataset_dir:
@@ -151,9 +154,9 @@ if __name__ == "__main__":
     logging.debug(f'loading datasets from from {args.dataset_dir}...')
     ds_train = datasets.load_from_disk(f'{args.dataset_dir}/ds_train')
     # if args.eval_bleu: # evaluating BLEU takes a long time, use small set
-    #     ds_val = datasets.load_from_disk(f'{args.dataset_dir}/ds_val_small')
+    ds_val = datasets.load_from_disk(f'{args.dataset_dir}/ds_val_small')
     # else:
-    ds_val = datasets.load_from_disk(f'{args.dataset_dir}/ds_val')
+    #     ds_val = datasets.load_from_disk(f'{args.dataset_dir}/ds_val')
     logging.debug(f'example from train:')
     logging.debug(f'{tokenizer.decode(ds_train[200]["input_ids"])}')
     logging.debug(f'{tokenizer.decode(ds_train[200]["labels"])}')

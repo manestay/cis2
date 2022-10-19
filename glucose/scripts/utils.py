@@ -1,10 +1,6 @@
 import os
 
-import nltk
 import pandas as pd
-from nltk.corpus import wordnet
-from tokenizers import Tokenizer
-from tokenizers.models import WordLevel
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
@@ -12,6 +8,24 @@ from local_vars import CANONICAL_COLS, RESULTS_COLS
 from cis2_lib import *
 
 tqdm.pandas()
+
+
+def split_output(df, output_label='output', check_len=True):
+    def standardize_len(row, std_len):
+        if len(row) < std_len:
+            return row + [''] * (std_len - len(row))
+        return row[:std_len]
+
+    print('splitting outputs')
+    output_rules = df[output_label].str.split(' \*\* ').str[0]
+    output_spec = output_rules.str.split('>').map(lambda x: [s.strip() for s in x])
+    lens = output_spec.apply(len)
+    if check_len:
+        assert lens.nunique() == 1  # with this split, shoudl always have len == 3
+    else:
+        output_spec = output_spec.apply(standardize_len, args=(3,))
+    df.loc[:, 'output_spec'] = output_spec
+
 
 def canonical_dict():
     return dict.fromkeys(CANONICAL_COLS)
@@ -116,3 +130,13 @@ def save_results_df(df, path, round=2):
         df = df.round(round)
     df.sort_index(inplace=True)
     df.to_csv(path, sep='\t')
+
+def get_exp_name(exp_num, model_size, sim_metric, specific_only=False):
+    if exp_num == 'baseline':
+        return exp_num
+    exp_name = f'exp{exp_num}_{model_size}'
+    if exp_num == 'cis2':
+        exp_name += f'_{sim_metric}'
+    if specific_only:
+        exp_name += '_specific_only'
+    return exp_name

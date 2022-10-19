@@ -5,7 +5,10 @@
 
 MODEL_SIZE=t5-large
 # set GPUS appropriately
-GPUS=0,1
+# GPUS=0,1
+
+SPEC=
+SPEC="--specific-only"
 
 if [ $MODEL_SIZE == "t5-large" ]; then
     BATCH_SIZE=8
@@ -16,26 +19,25 @@ else
 fi
 
 # 0 1 2a 2b 3a A
-for EXP_NUM in 0 1 2a 2b 3a A; do
-    EXP_NAME=exp${EXP_NUM}_${MODEL_SIZE}
+for EXP_NUM in 0; do
+    EXP_NAME=exp${EXP_NUM}_${MODEL_SIZE}_specific_only
 
     # python scripts/preprocess.py $EXP_NUM -ms $MODEL_SIZE --val_ids data/val_ids_small.txt
+    # python scripts/preprocess.py $EXP_NUM -ms $MODEL_SIZE
 
-    # CUDA_VISIBLE_DEVICES=${GPUS} python scripts/train.py $EXP_NUM -m $MODEL_SIZE --eval_bleu -bse 6 -bst $BATCH_SIZE
+    python scripts/train.py $EXP_NUM -m $MODEL_SIZE -bse 6 -bst $BATCH_SIZE $SPEC
+    # python scripts/train.py $EXP_NUM -m $MODEL_SIZE -bst $BATCH_SIZE --eval_em
 
     ## by default, runs inference on validation
-    # CUDA_VISIBLE_DEVICES=${GPUS} python scripts/inference.py $EXP_NUM -ms $MODEL_SIZE \
-    #     --batch_size $BATCH_SIZE_INF
-    # ## specify -d to run inference on test dataset
-    # CUDA_VISIBLE_DEVICES=${GPUS} python scripts/inference.py $EXP_NUM -ms $MODEL_SIZE \
-    #     -d data/${EXP_NAME}/ds_test  --batch_size $BATCH_SIZE_INF
+    python scripts/inference.py $EXP_NUM -ms $MODEL_SIZE \
+        --batch_size $BATCH_SIZE_INF $SPEC
+    ## specify -d to run inference on test dataset
+    python scripts/inference.py $EXP_NUM -ms $MODEL_SIZE \
+        -d data/${EXP_NAME}/ds_test  --batch_size $BATCH_SIZE_INF $SPEC
 
-    python scripts/evaluation.py $EXP_NUM -ms $MODEL_SIZE
+    ## for evaluating val, we use our own script, since we don't have 3 references
+    # python scripts/evaluation_val.py $EXP_NUM -ms $MODEL_SIZE
+
     ## for evaluating test, we use an adapted version of the GLUCOSE original evaluation script.
-    python scripts/evaluation.py $EXP_NUM -ms $MODEL_SIZE -i outputs/${EXP_NAME}/model/predictions_test.csv
-
-    ## evaluate baseline only for original experiment (exp0)
-    if [ "$EXP_NUM" == "0" ]; then
-        python scripts/evaluation_baseline.py -s outputs/${EXP_NAME}/ -ce
-    fi
+    python scripts/evaluation_test.py -s outputs/${EXP_NAME}/ -ce
 done

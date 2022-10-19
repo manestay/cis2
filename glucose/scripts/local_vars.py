@@ -6,12 +6,13 @@ SAVE_DIR = './data'
 SEED = 2557
 TRAIN_PATH = os.path.join(GLUCOSE_DIR, 'data/GLUCOSE_training_data_final.csv')
 TEST_PATH = os.path.join(GLUCOSE_DIR, 'data/nov27_key_final_copy.csv')
-CIS2_TEST_PATH = os.path.join(GLUCOSE_DIR, 'data/test_cis2.tsv')
 ALL_RESULTS_PATH = os.path.join(GLUCOSE_DIR, 'outputs/all_results.tsv')
-CIS2_RESULTS_PATH = os.path.join(GLUCOSE_DIR, 'outputs/cis2_results.tsv')
+
+CIS2_TEST_PATH = os.path.join(GLUCOSE_DIR, 'data/test_cis2_sent_vec.tsv')
+TEST_STORY_VECS = os.path.join(GLUCOSE_DIR, 'data/test_story_vecs.p')
 
 # note 'A' is legacy version of cis2
-EXP_NUMS = ['0', '1', '2a', '2b', '3a', 'A', 'cis2']
+EXP_NUMS = ['baseline', '0', '1', '2a', '2b', '3a', 'A', 'cis2']
 
 COLS_TO_FORMAT = ['input_ids', 'labels', 'attention_mask']
 
@@ -27,5 +28,7 @@ CANONICAL_COLS = [
 RESULTS_COLS = ['split', 'is_baseline', 'model', 'specific_avg', 'general_avg'] + \
     [f'specific_dim{i}' for i in range(1, 11)] + [f'general_dim{i}' for i in range(1, 11)]
 RESULTS_COLS += ['specific_avg1-5', 'specific_avg6-10', 'general_avg1-5', 'general_avg6-10']
+
+METRICS = ['bleu', 'sent_vecs']
 
 DELIM = '/@/'
