@@ -1,6 +1,7 @@
-# Careful with Context
+# $\text{CIS}^2$
 
-This repository contains the code used to run the experiments for the paper "CIS^2: A Simplified Commonsense Inference Evaluation for Story Prose".
+This repository contains the code used to run the experiments for the paper " $\text{CIS}^2$ : A Simplified Commonsense Inference Evaluation for Story Prose".
+
 
 ## Downloading data
 Download the datasets, and unzip them into this folder:
