@@ -34,7 +34,7 @@ You can download the best model checkpoint for the CIS^2 model [here](https://dr
     eprint = {2202.07880},
     journal={{Workshop on Commonsense Representation and Reasoning (CSRR) at ACL 2022}},
     year={2022},
-    url={https://openreview.net/forum?id=Se-xHMYg_bc}
+    url={https://arxiv.org/pdf/2202.07880.pdf}
     }
 ```
 
